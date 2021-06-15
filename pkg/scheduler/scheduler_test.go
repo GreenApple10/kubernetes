@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -51,6 +52,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/core"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/defaultbinder"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/feature"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/nodeports"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/noderesources"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/queuesort"
@@ -112,12 +114,8 @@ type mockScheduler struct {
 	err    error
 }
 
-func (es mockScheduler) Schedule(ctx context.Context, fwk framework.Framework, state *framework.CycleState, pod *v1.Pod) (core.ScheduleResult, error) {
+func (es mockScheduler) Schedule(ctx context.Context, extenders []framework.Extender, fwk framework.Framework, state *framework.CycleState, pod *v1.Pod) (core.ScheduleResult, error) {
 	return es.result, es.err
-}
-
-func (es mockScheduler) Extenders() []framework.Extender {
-	return nil
 }
 
 func TestSchedulerCreation(t *testing.T) {
@@ -176,7 +174,8 @@ func TestSchedulerCreation(t *testing.T) {
 
 			stopCh := make(chan struct{})
 			defer close(stopCh)
-			s, err := New(client,
+			s, err := New(
+				client,
 				informerFactory,
 				profile.NewRecorderFactory(eventBroadcaster),
 				stopCh,
@@ -456,7 +455,8 @@ func TestSchedulerMultipleProfilesScheduling(t *testing.T) {
 	defer cancel()
 
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	sched, err := New(client,
+	sched, err := New(
+		client,
 		informerFactory,
 		profile.NewRecorderFactory(broadcaster),
 		ctx.Done(),
@@ -719,7 +719,7 @@ func TestSchedulerFailedSchedulingReasons(t *testing.T) {
 	queuedPodStore := clientcache.NewFIFO(clientcache.MetaNamespaceKeyFunc)
 	scache := internalcache.New(10*time.Minute, stop)
 
-	// Design the baseline for the pods, and we will make nodes that dont fit it later.
+	// Design the baseline for the pods, and we will make nodes that don't fit it later.
 	var cpu = int64(4)
 	var mem = int64(500)
 	podWithTooBigResourceRequests := podWithResources("bar", "", v1.ResourceList{
@@ -768,7 +768,9 @@ func TestSchedulerFailedSchedulingReasons(t *testing.T) {
 	fns := []st.RegisterPluginFunc{
 		st.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
 		st.RegisterBindPlugin(defaultbinder.Name, defaultbinder.New),
-		st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+		st.RegisterPluginAsExtensions(noderesources.FitName, func(plArgs apiruntime.Object, fh framework.Handle) (framework.Plugin, error) {
+			return noderesources.NewFit(plArgs, fh, feature.Features{})
+		}, "Filter", "PreFilter"),
 	}
 	scheduler, _, errChan := setupTestScheduler(queuedPodStore, scache, informerFactory, nil, fns...)
 
@@ -825,13 +827,12 @@ func setupTestScheduler(queuedPodStore *clientcache.FIFO, scache internalcache.C
 		frameworkruntime.WithClientSet(client),
 		frameworkruntime.WithEventRecorder(recorder),
 		frameworkruntime.WithInformerFactory(informerFactory),
-		frameworkruntime.WithPodNominator(internalqueue.NewPodNominator()),
+		frameworkruntime.WithPodNominator(internalqueue.NewPodNominator(informerFactory.Core().V1().Pods().Lister())),
 	)
 
 	algo := core.NewGenericScheduler(
 		scache,
 		internalcache.NewEmptySnapshot(),
-		[]framework.Extender{},
 		schedulerapi.DefaultPercentageOfNodesToScore,
 	)
 
@@ -1178,11 +1179,11 @@ func TestSchedulerBinding(t *testing.T) {
 			algo := core.NewGenericScheduler(
 				scache,
 				nil,
-				test.extenders,
 				0,
 			)
 			sched := Scheduler{
 				Algorithm:      algo,
+				Extenders:      test.extenders,
 				SchedulerCache: scache,
 			}
 			err = sched.bind(context.Background(), fwk, pod, "node", nil)

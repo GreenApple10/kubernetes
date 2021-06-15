@@ -284,6 +284,10 @@ func TestDescribeConfigMap(t *testing.T) {
 			"key1": "value1",
 			"key2": "value2",
 		},
+		BinaryData: map[string][]byte{
+			"binarykey1": {0xFF, 0xFE, 0xFD, 0xFC, 0xFB},
+			"binarykey2": {0xFF, 0xFE, 0xFD, 0xFC, 0xFB, 0xFA},
+		},
 	})
 	c := &describeClient{T: t, Namespace: "foo", Interface: fake}
 	d := ConfigMapDescriber{c}
@@ -291,7 +295,13 @@ func TestDescribeConfigMap(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "foo") || !strings.Contains(out, "mycm") || !strings.Contains(out, "key1") || !strings.Contains(out, "value1") || !strings.Contains(out, "key2") || !strings.Contains(out, "value2") {
+	if !strings.Contains(out, "foo") || !strings.Contains(out, "mycm") {
+		t.Errorf("unexpected out: %s", out)
+	}
+	if !strings.Contains(out, "key1") || !strings.Contains(out, "value1") || !strings.Contains(out, "key2") || !strings.Contains(out, "value2") {
+		t.Errorf("unexpected out: %s", out)
+	}
+	if !strings.Contains(out, "binarykey1") || !strings.Contains(out, "5 bytes") || !strings.Contains(out, "binarykey2") || !strings.Contains(out, "6 bytes") {
 		t.Errorf("unexpected out: %s", out)
 	}
 }
@@ -2065,6 +2075,7 @@ func TestDescribeDeployment(t *testing.T) {
 }
 
 func TestDescribeJob(t *testing.T) {
+	indexedCompletion := batchv1.IndexedCompletion
 	cases := map[string]struct {
 		job                  *batchv1.Job
 		wantCompletedIndexes string
@@ -2075,9 +2086,7 @@ func TestDescribeJob(t *testing.T) {
 					Name:      "bar",
 					Namespace: "foo",
 				},
-				Spec: batchv1.JobSpec{
-					CompletionMode: batchv1.NonIndexedCompletion,
-				},
+				Spec: batchv1.JobSpec{},
 			},
 		},
 		"no indexes": {
@@ -2087,7 +2096,7 @@ func TestDescribeJob(t *testing.T) {
 					Namespace: "foo",
 				},
 				Spec: batchv1.JobSpec{
-					CompletionMode: batchv1.IndexedCompletion,
+					CompletionMode: &indexedCompletion,
 				},
 			},
 			wantCompletedIndexes: "<none>",
@@ -2099,7 +2108,7 @@ func TestDescribeJob(t *testing.T) {
 					Namespace: "foo",
 				},
 				Spec: batchv1.JobSpec{
-					CompletionMode: batchv1.IndexedCompletion,
+					CompletionMode: &indexedCompletion,
 				},
 				Status: batchv1.JobStatus{
 					CompletedIndexes: "0-5,7,9,10,12,13,15,16,18,20,21,23,24,26,27,29,30,32",
@@ -2114,7 +2123,7 @@ func TestDescribeJob(t *testing.T) {
 					Namespace: "foo",
 				},
 				Spec: batchv1.JobSpec{
-					CompletionMode: batchv1.IndexedCompletion,
+					CompletionMode: &indexedCompletion,
 				},
 				Status: batchv1.JobStatus{
 					CompletedIndexes: "0-5,7,9,10,12,13,15,16,18,20,21,23,24,26,27,29,30,32-34,36,37",
@@ -2214,6 +2223,12 @@ func TestDescribeIngress(t *testing.T) {
 			Name:     "bar",
 		},
 	}
+	backendResourceNoAPIGroup := networkingv1.IngressBackend{
+		Resource: &corev1.TypedLocalObjectReference{
+			Kind: "foo",
+			Name: "bar",
+		},
+	}
 
 	tests := map[string]struct {
 		input  *fake.Clientset
@@ -2280,6 +2295,42 @@ Rules:
   ----         ----  --------
   foo.bar.com  
                /foo   APIGroup: example.com, Kind: foo, Name: bar
+Annotations:   <none>
+Events:        <none>` + "\n",
+		},
+		"IngressRule.HTTP.Paths.Backend.Resource v1 Without APIGroup": {
+			input: fake.NewSimpleClientset(&networkingv1.Ingress{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bar",
+					Namespace: "foo",
+				},
+				Spec: networkingv1.IngressSpec{
+					Rules: []networkingv1.IngressRule{
+						{
+							Host: "foo.bar.com",
+							IngressRuleValue: networkingv1.IngressRuleValue{
+								HTTP: &networkingv1.HTTPIngressRuleValue{
+									Paths: []networkingv1.HTTPIngressPath{
+										{
+											Path:    "/foo",
+											Backend: backendResourceNoAPIGroup,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}),
+			output: `Name:             bar
+Namespace:        foo
+Address:          
+Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
+Rules:
+  Host         Path  Backends
+  ----         ----  --------
+  foo.bar.com  
+               /foo   APIGroup: <none>, Kind: foo, Name: bar
 Annotations:   <none>
 Events:        <none>` + "\n",
 		},
@@ -4833,6 +4884,7 @@ Events:         <none>` + "\n",
 						Addresses:  []string{"1.2.3.6", "1.2.3.7"},
 						Conditions: discoveryv1.EndpointConditions{Ready: utilpointer.BoolPtr(true)},
 						TargetRef:  &corev1.ObjectReference{Kind: "Pod", Name: "test-124"},
+						NodeName:   utilpointer.StringPtr("node-2"),
 					},
 				},
 				Ports: []discoveryv1.EndpointPort{
@@ -4865,7 +4917,7 @@ Endpoints:
       Ready:    true
     Hostname:   <unset>
     TargetRef:  Pod/test-124
-    NodeName:   <unset>
+    NodeName:   node-2
     Zone:       <unset>
 Events:         <none>` + "\n",
 		},

@@ -40,6 +40,9 @@ import (
 	"k8s.io/component-base/metrics/legacyregistry"
 	"k8s.io/component-base/metrics/testutil"
 	"k8s.io/klog/v2"
+	"k8s.io/kube-scheduler/config/v1beta1"
+	"k8s.io/kubernetes/pkg/scheduler/apis/config"
+	kubeschedulerscheme "k8s.io/kubernetes/pkg/scheduler/apis/config/scheme"
 	"k8s.io/kubernetes/test/integration/util"
 	testutils "k8s.io/kubernetes/test/utils"
 )
@@ -53,6 +56,16 @@ const (
 
 var dataItemsDir = flag.String("data-items-dir", "", "destination directory for storing generated data items for perf dashboard")
 
+func newDefaultComponentConfig() (*config.KubeSchedulerConfiguration, error) {
+	gvk := v1beta1.SchemeGroupVersion.WithKind("KubeSchedulerConfiguration")
+	cfg := config.KubeSchedulerConfiguration{}
+	_, _, err := kubeschedulerscheme.Codecs.UniversalDecoder().Decode(nil, &gvk, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 // mustSetupScheduler starts the following components:
 // - k8s api server (a.k.a. master)
 // - scheduler
@@ -60,9 +73,12 @@ var dataItemsDir = flag.String("data-items-dir", "", "destination directory for 
 // remove resources after finished.
 // Notes on rate limiter:
 //   - client rate limit is set to 5000.
-func mustSetupScheduler() (util.ShutdownFunc, coreinformers.PodInformer, clientset.Interface, dynamic.Interface) {
+func mustSetupScheduler(config *config.KubeSchedulerConfiguration) (util.ShutdownFunc, coreinformers.PodInformer, clientset.Interface, dynamic.Interface) {
 	apiURL, apiShutdown := util.StartApiserver()
+	var err error
 
+	// TODO: client connection configuration, such as QPS or Burst is configurable in theory, this could be derived from the `config`, need to
+	// support this when there is any testcase that depends on such configuration.
 	cfg := &restclient.Config{
 		Host:          apiURL,
 		ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}},
@@ -70,10 +86,20 @@ func mustSetupScheduler() (util.ShutdownFunc, coreinformers.PodInformer, clients
 		Burst:         5000,
 	}
 
+	// use default component config if config here is nil
+	if config == nil {
+		config, err = newDefaultComponentConfig()
+		if err != nil {
+			klog.Fatalf("Error creating default component config: %v", err)
+		}
+	}
+
 	client := clientset.NewForConfigOrDie(cfg)
 	dynClient := dynamic.NewForConfigOrDie(cfg)
 
-	_, podInformer, schedulerShutdown := util.StartScheduler(client)
+	// Not all config options will be effective but only those mostly related with scheduler performance will
+	// be applied to start a scheduler, most of them are defined in `scheduler.schedulerOptions`.
+	_, podInformer, schedulerShutdown := util.StartScheduler(client, cfg, config)
 	fakePVControllerShutdown := util.StartFakePVController(client)
 
 	shutdownFunc := func() {
@@ -202,7 +228,8 @@ func collectHistogram(metric string, labels map[string]string) *DataItem {
 
 	q50 := hist.Quantile(0.50)
 	q90 := hist.Quantile(0.90)
-	q99 := hist.Quantile(0.95)
+	q95 := hist.Quantile(0.95)
+	q99 := hist.Quantile(0.99)
 	avg := hist.Average()
 
 	msFactor := float64(time.Second) / float64(time.Millisecond)
@@ -217,6 +244,7 @@ func collectHistogram(metric string, labels map[string]string) *DataItem {
 		Data: map[string]float64{
 			"Perc50":  q50 * msFactor,
 			"Perc90":  q90 * msFactor,
+			"Perc95":  q95 * msFactor,
 			"Perc99":  q99 * msFactor,
 			"Average": avg * msFactor,
 		},
@@ -285,6 +313,7 @@ func (tc *throughputCollector) collect() []DataItem {
 			"Average": sum / float64(length),
 			"Perc50":  tc.schedulingThroughputs[int(math.Ceil(float64(length*50)/100))-1],
 			"Perc90":  tc.schedulingThroughputs[int(math.Ceil(float64(length*90)/100))-1],
+			"Perc95":  tc.schedulingThroughputs[int(math.Ceil(float64(length*95)/100))-1],
 			"Perc99":  tc.schedulingThroughputs[int(math.Ceil(float64(length*99)/100))-1],
 		}
 		throughputSummary.Unit = "pods/s"

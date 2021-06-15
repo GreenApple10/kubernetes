@@ -53,6 +53,7 @@ type migrationOpCheck struct {
 
 // BaseSuites is a list of storage test suites that work for in-tree and CSI drivers
 var BaseSuites = []func() storageframework.TestSuite{
+	InitCapacityTestSuite,
 	InitVolumesTestSuite,
 	InitVolumeIOTestSuite,
 	InitVolumeModeTestSuite,
@@ -72,6 +73,7 @@ var CSISuites = append(BaseSuites,
 	InitEphemeralTestSuite,
 	InitSnapshottableTestSuite,
 	InitSnapshottableStressTestSuite,
+	InitVolumePerformanceTestSuite,
 )
 
 func getVolumeOpsFromMetricsForPlugin(ms testutil.Metrics, pluginName string) opCounts {
@@ -105,7 +107,7 @@ func getVolumeOpCounts(c clientset.Interface, pluginName string) opCounts {
 
 	nodeLimit := 25
 
-	metricsGrabber, err := e2emetrics.NewMetricsGrabber(c, nil, true, false, true, false, false)
+	metricsGrabber, err := e2emetrics.NewMetricsGrabber(c, nil, true, false, true, false, false, false)
 
 	if err != nil {
 		framework.ExpectNoError(err, "Error creating metrics grabber: %v", err)

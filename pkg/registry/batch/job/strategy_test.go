@@ -99,7 +99,7 @@ func testJobStrategy(t *testing.T) {
 			// Set gated values.
 			Suspend:                 pointer.BoolPtr(true),
 			TTLSecondsAfterFinished: pointer.Int32Ptr(0),
-			CompletionMode:          batch.IndexedCompletion,
+			CompletionMode:          completionModePtr(batch.IndexedCompletion),
 		},
 		Status: batch.JobStatus{
 			Active: 11,
@@ -110,6 +110,9 @@ func testJobStrategy(t *testing.T) {
 	if job.Status.Active != 0 {
 		t.Errorf("Job does not allow setting status on create")
 	}
+	if job.Generation != 1 {
+		t.Errorf("expected Generation=1, got %d", job.Generation)
+	}
 	errs := Strategy.Validate(ctx, job)
 	if len(errs) != 0 {
 		t.Errorf("Unexpected error validating %v", errs)
@@ -117,14 +120,23 @@ func testJobStrategy(t *testing.T) {
 	if ttlEnabled != (job.Spec.TTLSecondsAfterFinished != nil) {
 		t.Errorf("Job should allow setting .spec.ttlSecondsAfterFinished only when %v feature is enabled", features.TTLAfterFinished)
 	}
-	if indexedJobEnabled != (job.Spec.CompletionMode != batch.NonIndexedCompletion) {
-		t.Errorf("Job should allow setting .spec.completionMode=Indexed only when %v feature is enabled", features.IndexedJob)
+	if indexedJobEnabled != (job.Spec.CompletionMode != nil) {
+		t.Errorf("Job should allow setting .spec.completionMode only when %v feature is enabled", features.IndexedJob)
 	}
-	if !suspendJobEnabled && *job.Spec.Suspend {
-		t.Errorf("[SuspendJob=%v] .spec.suspend should be set to true", suspendJobEnabled)
+	if !suspendJobEnabled && (job.Spec.Suspend != nil) {
+		t.Errorf("Job should allow setting .spec.suspend only when %v feature is enabled", features.SuspendJob)
 	}
 
 	parallelism := int32(10)
+
+	// ensure we do not change generation for non-spec updates
+	updatedLabelJob := job.DeepCopy()
+	updatedLabelJob.Labels = map[string]string{"a": "true"}
+	Strategy.PrepareForUpdate(ctx, updatedLabelJob, job)
+	if updatedLabelJob.Generation != 1 {
+		t.Errorf("expected Generation=1, got %d", updatedLabelJob.Generation)
+	}
+
 	updatedJob := &batch.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: "bar", ResourceVersion: "4"},
 		Spec: batch.JobSpec{
@@ -132,7 +144,7 @@ func testJobStrategy(t *testing.T) {
 			Completions: pointer.Int32Ptr(2),
 			// Update gated features.
 			TTLSecondsAfterFinished: pointer.Int32Ptr(1),
-			CompletionMode:          batch.IndexedCompletion, // No change because field is immutable.
+			CompletionMode:          completionModePtr(batch.IndexedCompletion), // No change because field is immutable.
 		},
 		Status: batch.JobStatus{
 			Active: 11,
@@ -144,6 +156,9 @@ func testJobStrategy(t *testing.T) {
 	if updatedJob.Status.Active != 10 {
 		t.Errorf("PrepareForUpdate should have preserved prior version status")
 	}
+	if updatedJob.Generation != 2 {
+		t.Errorf("expected Generation=2, got %d", updatedJob.Generation)
+	}
 	if ttlEnabled != (updatedJob.Spec.TTLSecondsAfterFinished != nil) {
 		t.Errorf("Job should only allow updating .spec.ttlSecondsAfterFinished when %v feature is enabled", features.TTLAfterFinished)
 	}
@@ -153,21 +168,10 @@ func testJobStrategy(t *testing.T) {
 		t.Errorf("Expected a validation error")
 	}
 
-	// Existing gated fields should be preserved
-	job.Spec.TTLSecondsAfterFinished = pointer.Int32Ptr(1)
-	job.Spec.CompletionMode = batch.IndexedCompletion
-	updatedJob.Spec.TTLSecondsAfterFinished = pointer.Int32Ptr(2)
-	updatedJob.Spec.CompletionMode = batch.IndexedCompletion
 	// Test updating suspend false->true and nil-> true when the feature gate is
 	// disabled. We don't care about other combinations.
 	job.Spec.Suspend, updatedJob.Spec.Suspend = pointer.BoolPtr(false), pointer.BoolPtr(true)
 	Strategy.PrepareForUpdate(ctx, updatedJob, job)
-	if job.Spec.TTLSecondsAfterFinished == nil || updatedJob.Spec.TTLSecondsAfterFinished == nil {
-		t.Errorf("existing .spec.ttlSecondsAfterFinished should be preserved")
-	}
-	if job.Spec.CompletionMode == "" || updatedJob.Spec.CompletionMode == "" {
-		t.Errorf("existing completionMode should be preserved")
-	}
 	if !suspendJobEnabled && *updatedJob.Spec.Suspend {
 		t.Errorf("[SuspendJob=%v] .spec.suspend should not be updated from false to true", suspendJobEnabled)
 	}
@@ -323,4 +327,8 @@ func TestSelectableFieldLabelConversions(t *testing.T) {
 		JobToSelectableFields(&batch.Job{}),
 		nil,
 	)
+}
+
+func completionModePtr(m batch.CompletionMode) *batch.CompletionMode {
+	return &m
 }

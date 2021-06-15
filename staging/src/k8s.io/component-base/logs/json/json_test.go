@@ -19,7 +19,6 @@ package logs
 import (
 	"bufio"
 	"bytes"
-	"flag"
 	"fmt"
 	"testing"
 	"time"
@@ -28,8 +27,6 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	"k8s.io/klog/v2"
 )
 
 // TestZapLoggerInfo test ZapLogger json info format
@@ -103,12 +100,12 @@ func TestZapLoggerV(t *testing.T) {
 		var buffer bytes.Buffer
 		writer := bufio.NewWriter(&buffer)
 		var sampleInfoLogger = NewJSONLogger(zapcore.AddSync(writer))
-		sampleInfoLogger.V(i).Info("test", "ns", "default", "podnum", 2)
+		sampleInfoLogger.V(i).Info("test", "ns", "default", "podnum", 2, "time", time.Microsecond)
 		writer.Flush()
 		logStr := buffer.String()
 		var v int
 		var expectFormat string
-		expectFormat = "{\"ts\":0.000123,\"msg\":\"test\",\"v\":%d,\"ns\":\"default\",\"podnum\":2}\n"
+		expectFormat = "{\"ts\":0.000123,\"msg\":\"test\",\"v\":%d,\"ns\":\"default\",\"podnum\":2,\"time\":\"1µs\"}\n"
 		n, err := fmt.Sscanf(logStr, expectFormat, &v)
 		if n != 1 || err != nil {
 			t.Errorf("log format error: %d elements, error %s:\n%s", n, err, logStr)
@@ -132,11 +129,11 @@ func TestZapLoggerError(t *testing.T) {
 		return time.Date(1970, time.January, 1, 0, 0, 0, 123, time.UTC)
 	}
 	var sampleInfoLogger = NewJSONLogger(zapcore.AddSync(writer))
-	sampleInfoLogger.Error(fmt.Errorf("ivailid namespace:%s", "default"), "wrong namespace", "ns", "default", "podnum", 2)
+	sampleInfoLogger.Error(fmt.Errorf("ivailid namespace:%s", "default"), "wrong namespace", "ns", "default", "podnum", 2, "time", time.Microsecond)
 	writer.Flush()
 	logStr := buffer.String()
 	var ts float64
-	expectFormat := `{"ts":%f,"msg":"wrong namespace","v":0,"ns":"default","podnum":2,"err":"ivailid namespace:default"}`
+	expectFormat := `{"ts":%f,"msg":"wrong namespace","v":0,"ns":"default","podnum":2,"time":"1µs","err":"ivailid namespace:default"}`
 	n, err := fmt.Sscanf(logStr, expectFormat, &ts)
 	if n != 1 || err != nil {
 		t.Errorf("log format error: %d elements, error %s:\n%s", n, err, logStr)
@@ -144,38 +141,6 @@ func TestZapLoggerError(t *testing.T) {
 	expect := fmt.Sprintf(expectFormat, ts)
 	if !assert.JSONEq(t, expect, logStr) {
 		t.Errorf("Info has wrong format \n expect:%s\n got:%s", expect, logStr)
-	}
-}
-
-// TestKlogV test klog -v(--verbose) func available with json logger
-func TestKlogV(t *testing.T) {
-	var buffer testBuff
-	logger := NewJSONLogger(&buffer)
-	klog.SetLogger(logger)
-	defer klog.SetLogger(nil)
-	fs := flag.FlagSet{}
-	klog.InitFlags(&fs)
-	totalLogsWritten := 0
-
-	defer fs.Set("v", "0")
-
-	for i := 0; i < 11; i++ {
-		err := fs.Set("v", fmt.Sprintf("%d", i))
-		if err != nil {
-			t.Fatalf("Failed to set verbosity")
-		}
-		for j := 0; j < 11; j++ {
-			klog.V(klog.Level(j)).Info("test")
-			logWritten := buffer.writeCount > 0
-			totalLogsWritten += buffer.writeCount
-			buffer.writeCount = 0
-			if logWritten == (i < j) {
-				t.Errorf("klog.V(%d).Info(...) wrote log when -v=%d", j, i)
-			}
-		}
-	}
-	if totalLogsWritten != 66 {
-		t.Fatalf("Unexpected number of logs written, got %d, expected 66", totalLogsWritten)
 	}
 }
 

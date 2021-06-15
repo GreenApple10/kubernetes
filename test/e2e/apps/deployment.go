@@ -164,6 +164,9 @@ var _ = SIGDescribe("Deployment", func() {
 	})
 	// TODO: add tests that cover deployment.Spec.MinReadySeconds once we solved clock-skew issues
 	// See https://github.com/kubernetes/kubernetes/issues/29229
+	// Add UnavailableReplicas check because ReadyReplicas or UpdatedReplicas might not represent
+	// the actual number of pods running successfully if some pods failed to start after update or patch.
+	// See issue ##100192
 
 	/*
 		Release: v1.20
@@ -174,7 +177,7 @@ var _ = SIGDescribe("Deployment", func() {
 		the Deployment.
 	*/
 	framework.ConformanceIt("should run the lifecycle of a Deployment", func() {
-		zero := int64(0)
+		one := int64(1)
 		deploymentResource := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
 		testNamespaceName := f.Namespace.Name
 		testDeploymentName := "test-deployment"
@@ -212,7 +215,7 @@ var _ = SIGDescribe("Deployment", func() {
 						Labels: testDeploymentLabelSelectors.MatchLabels,
 					},
 					Spec: v1.PodSpec{
-						TerminationGracePeriodSeconds: &zero,
+						TerminationGracePeriodSeconds: &one,
 						Containers: []v1.Container{{
 							Name:  testDeploymentName,
 							Image: testDeploymentInitialImage,
@@ -243,7 +246,7 @@ var _ = SIGDescribe("Deployment", func() {
 		framework.ExpectNoError(err, "failed to see %v event", watch.Added)
 
 		ginkgo.By("waiting for all Replicas to be Ready")
-		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Minute)
+		ctx, cancel = context.WithTimeout(context.Background(), f.Timeouts.PodStart)
 		defer cancel()
 		_, err = watchtools.Until(ctx, deploymentsList.ResourceVersion, w, func(event watch.Event) (bool, error) {
 			if deployment, ok := event.Object.(*appsv1.Deployment); ok {
@@ -269,11 +272,10 @@ var _ = SIGDescribe("Deployment", func() {
 				"replicas": testDeploymentMinimumReplicas,
 				"template": map[string]interface{}{
 					"spec": map[string]interface{}{
-						"TerminationGracePeriodSeconds": &zero,
+						"TerminationGracePeriodSeconds": &one,
 						"containers": [1]map[string]interface{}{{
-							"name":    testDeploymentName,
-							"image":   testDeploymentPatchImage,
-							"command": []string{"/bin/sleep", "100000"},
+							"name":  testDeploymentName,
+							"image": testDeploymentPatchImage,
 						}},
 					},
 				},
@@ -303,13 +305,15 @@ var _ = SIGDescribe("Deployment", func() {
 		framework.ExpectNoError(err, "failed to see %v event", watch.Modified)
 
 		ginkgo.By("waiting for Replicas to scale")
-		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Minute)
+		ctx, cancel = context.WithTimeout(context.Background(), f.Timeouts.PodStart)
 		defer cancel()
 		_, err = watchtools.Until(ctx, deploymentsList.ResourceVersion, w, func(event watch.Event) (bool, error) {
 			if deployment, ok := event.Object.(*appsv1.Deployment); ok {
 				found := deployment.ObjectMeta.Name == testDeployment.Name &&
 					deployment.ObjectMeta.Labels["test-deployment-static"] == "true" &&
 					deployment.Status.ReadyReplicas == testDeploymentMinimumReplicas &&
+					deployment.Status.UpdatedReplicas == testDeploymentMinimumReplicas &&
+					deployment.Status.UnavailableReplicas == 0 &&
 					deployment.Spec.Template.Spec.Containers[0].Image == testDeploymentPatchImage
 				if !found {
 					framework.Logf("observed Deployment %v in namespace %v with ReadyReplicas %v", deployment.ObjectMeta.Name, deployment.ObjectMeta.Namespace, deployment.Status.ReadyReplicas)
@@ -380,13 +384,15 @@ var _ = SIGDescribe("Deployment", func() {
 		framework.ExpectEqual(deploymentGet.Spec.Template.Spec.Containers[0].Image, testDeploymentUpdateImage, "failed to update image")
 		framework.ExpectEqual(deploymentGet.ObjectMeta.Labels["test-deployment"], "updated", "failed to update labels")
 
-		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Minute)
+		ctx, cancel = context.WithTimeout(context.Background(), f.Timeouts.PodStart)
 		defer cancel()
 		_, err = watchtools.Until(ctx, deploymentsList.ResourceVersion, w, func(event watch.Event) (bool, error) {
 			if deployment, ok := event.Object.(*appsv1.Deployment); ok {
 				found := deployment.ObjectMeta.Name == testDeployment.Name &&
 					deployment.ObjectMeta.Labels["test-deployment-static"] == "true" &&
-					deployment.Status.ReadyReplicas == testDeploymentDefaultReplicas
+					deployment.Status.ReadyReplicas == testDeploymentDefaultReplicas &&
+					deployment.Status.UpdatedReplicas == testDeploymentDefaultReplicas &&
+					deployment.Status.UnavailableReplicas == 0
 				if !found {
 					framework.Logf("observed Deployment %v in namespace %v with ReadyReplicas %v and labels %v", deployment.ObjectMeta.Name, deployment.ObjectMeta.Namespace, deployment.Status.ReadyReplicas, deployment.ObjectMeta.Labels)
 				}
@@ -432,13 +438,15 @@ var _ = SIGDescribe("Deployment", func() {
 		framework.ExpectNoError(err, "failed to convert the unstructured response to a Deployment")
 		framework.ExpectEqual(deploymentGet.Spec.Template.Spec.Containers[0].Image, testDeploymentUpdateImage, "failed to update image")
 		framework.ExpectEqual(deploymentGet.ObjectMeta.Labels["test-deployment"], "updated", "failed to update labels")
-		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel = context.WithTimeout(context.Background(), f.Timeouts.PodStart)
 		defer cancel()
 		_, err = watchtools.Until(ctx, deploymentsList.ResourceVersion, w, func(event watch.Event) (bool, error) {
 			if deployment, ok := event.Object.(*appsv1.Deployment); ok {
 				found := deployment.ObjectMeta.Name == testDeployment.Name &&
 					deployment.ObjectMeta.Labels["test-deployment-static"] == "true" &&
 					deployment.Status.ReadyReplicas == testDeploymentDefaultReplicas &&
+					deployment.Status.UpdatedReplicas == testDeploymentDefaultReplicas &&
+					deployment.Status.UnavailableReplicas == 0 &&
 					deployment.Spec.Template.Spec.Containers[0].Image == testDeploymentUpdateImage
 				if !found {
 					framework.Logf("observed Deployment %v in namespace %v with ReadyReplicas %v", deployment.ObjectMeta.Name, deployment.ObjectMeta.Namespace, deployment.Status.ReadyReplicas)
@@ -450,7 +458,7 @@ var _ = SIGDescribe("Deployment", func() {
 		framework.ExpectNoError(err, "failed to see replicas of %v in namespace %v scale to requested amount of %v", testDeployment.Name, testNamespaceName, testDeploymentDefaultReplicas)
 
 		ginkgo.By("deleting the Deployment")
-		err = f.ClientSet.AppsV1().Deployments(testNamespaceName).DeleteCollection(context.TODO(), metav1.DeleteOptions{GracePeriodSeconds: &zero}, metav1.ListOptions{LabelSelector: testDeploymentLabelsFlat})
+		err = f.ClientSet.AppsV1().Deployments(testNamespaceName).DeleteCollection(context.TODO(), metav1.DeleteOptions{GracePeriodSeconds: &one}, metav1.ListOptions{LabelSelector: testDeploymentLabelsFlat})
 		framework.ExpectNoError(err, "failed to delete Deployment via collection")
 
 		ctx, cancel = context.WithTimeout(context.Background(), 1*time.Minute)

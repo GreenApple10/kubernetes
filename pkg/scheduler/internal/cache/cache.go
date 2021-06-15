@@ -170,7 +170,7 @@ func (cache *schedulerCache) removeNodeInfoFromList(name string) {
 	delete(cache.nodes, name)
 }
 
-// Snapshot takes a snapshot of the current scheduler cache. This is used for
+// Dump produces a dump of the current scheduler cache. This is used for
 // debugging purposes only and shouldn't be confused with UpdateSnapshot
 // function.
 // This method is expensive, and should be only used in non-critical path.
@@ -593,7 +593,7 @@ func (cache *schedulerCache) GetPod(pod *v1.Pod) (*v1.Pod, error) {
 	return podState.pod, nil
 }
 
-func (cache *schedulerCache) AddNode(node *v1.Node) error {
+func (cache *schedulerCache) AddNode(node *v1.Node) *framework.NodeInfo {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
@@ -608,10 +608,11 @@ func (cache *schedulerCache) AddNode(node *v1.Node) error {
 
 	cache.nodeTree.addNode(node)
 	cache.addNodeImageStates(node, n.info)
-	return n.info.SetNode(node)
+	n.info.SetNode(node)
+	return n.info.Clone()
 }
 
-func (cache *schedulerCache) UpdateNode(oldNode, newNode *v1.Node) error {
+func (cache *schedulerCache) UpdateNode(oldNode, newNode *v1.Node) *framework.NodeInfo {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
@@ -627,7 +628,8 @@ func (cache *schedulerCache) UpdateNode(oldNode, newNode *v1.Node) error {
 
 	cache.nodeTree.updateNode(oldNode, newNode)
 	cache.addNodeImageStates(newNode, n.info)
-	return n.info.SetNode(newNode)
+	n.info.SetNode(newNode)
+	return n.info.Clone()
 }
 
 // RemoveNode removes a node from the cache's tree.

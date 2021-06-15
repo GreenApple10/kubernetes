@@ -55,7 +55,7 @@ type nodeStateManager struct {
 // from configurations provided by a ConfigMap object and then verifies that the
 // configuration is applied correctly.
 func TestSchedulerCreationFromConfigMap(t *testing.T) {
-	_, s, closeFn := framework.RunAMaster(nil)
+	_, s, closeFn := framework.RunAnAPIServer(nil)
 	defer closeFn()
 
 	ns := framework.CreateTestingNamespace("configmap", s, t)
@@ -282,12 +282,10 @@ priorities: []
 			informerFactory,
 			profile.NewRecorderFactory(eventBroadcaster),
 			nil,
-			scheduler.WithAlgorithmSource(kubeschedulerconfig.SchedulerAlgorithmSource{
-				Policy: &kubeschedulerconfig.SchedulerPolicySource{
-					ConfigMap: &kubeschedulerconfig.SchedulerPolicyConfigMapSource{
-						Namespace: policyConfigMap.Namespace,
-						Name:      policyConfigMap.Name,
-					},
+			scheduler.WithLegacyPolicySource(&kubeschedulerconfig.SchedulerPolicySource{
+				ConfigMap: &kubeschedulerconfig.SchedulerPolicyConfigMapSource{
+					Namespace: policyConfigMap.Namespace,
+					Name:      policyConfigMap.Name,
 				},
 			}),
 			scheduler.WithProfiles(kubeschedulerconfig.KubeSchedulerProfile{
@@ -316,7 +314,7 @@ priorities: []
 // TestSchedulerCreationFromNonExistentConfigMap ensures that creation of the
 // scheduler from a non-existent ConfigMap fails.
 func TestSchedulerCreationFromNonExistentConfigMap(t *testing.T) {
-	_, s, closeFn := framework.RunAMaster(nil)
+	_, s, closeFn := framework.RunAnAPIServer(nil)
 	defer closeFn()
 
 	ns := framework.CreateTestingNamespace("configmap", s, t)
@@ -335,12 +333,10 @@ func TestSchedulerCreationFromNonExistentConfigMap(t *testing.T) {
 		informerFactory,
 		profile.NewRecorderFactory(eventBroadcaster),
 		nil,
-		scheduler.WithAlgorithmSource(kubeschedulerconfig.SchedulerAlgorithmSource{
-			Policy: &kubeschedulerconfig.SchedulerPolicySource{
-				ConfigMap: &kubeschedulerconfig.SchedulerPolicyConfigMapSource{
-					Namespace: "non-existent-config",
-					Name:      "non-existent-config",
-				},
+		scheduler.WithLegacyPolicySource(&kubeschedulerconfig.SchedulerPolicySource{
+			ConfigMap: &kubeschedulerconfig.SchedulerPolicyConfigMapSource{
+				Namespace: "non-existent-config",
+				Name:      "non-existent-config",
 			},
 		}),
 		scheduler.WithProfiles(kubeschedulerconfig.KubeSchedulerProfile{

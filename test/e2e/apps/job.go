@@ -153,10 +153,11 @@ var _ = SIGDescribe("Job", func() {
 		Testcase: Ensure Pods of an Indexed Job get a unique index.
 		Description: Create an Indexed Job, wait for completion, capture the output of the pods and verify that they contain the completion index.
 	*/
-	ginkgo.It("[Feature:IndexedJob] should create pods for an Indexed job with completion indexes", func() {
+	ginkgo.It("should create pods for an Indexed job with completion indexes and specified hostname", func() {
 		ginkgo.By("Creating Indexed job")
 		job := e2ejob.NewTestJob("succeed", "indexed-job", v1.RestartPolicyNever, parallelism, completions, nil, backoffLimit)
-		job.Spec.CompletionMode = batchv1.IndexedCompletion
+		mode := batchv1.IndexedCompletion
+		job.Spec.CompletionMode = &mode
 		job, err := e2ejob.CreateJob(f.ClientSet, f.Namespace.Name, job)
 		framework.ExpectNoError(err, "failed to create indexed job in namespace %s", f.Namespace.Name)
 
@@ -170,14 +171,16 @@ var _ = SIGDescribe("Job", func() {
 		succeededIndexes := sets.NewInt()
 		for _, pod := range pods.Items {
 			if pod.Status.Phase == v1.PodSucceeded && pod.Annotations != nil {
-				ix, err := strconv.Atoi(pod.Annotations[batchv1.JobCompletionIndexAnnotationAlpha])
+				ix, err := strconv.Atoi(pod.Annotations[batchv1.JobCompletionIndexAnnotation])
 				framework.ExpectNoError(err, "failed obtaining completion index from pod in namespace: %s", f.Namespace.Name)
 				succeededIndexes.Insert(ix)
+				expectedName := fmt.Sprintf("%s-%d", job.Name, ix)
+				framework.ExpectEqual(pod.Spec.Hostname, expectedName, "expected completed pod with hostname %s, but got %s", expectedName, pod.Spec.Hostname)
 			}
 		}
 		gotIndexes := succeededIndexes.List()
 		wantIndexes := []int{0, 1, 2, 3}
-		framework.ExpectEqual(gotIndexes, wantIndexes, "expected completed indexes %s, but got %s", gotIndexes, wantIndexes)
+		framework.ExpectEqual(gotIndexes, wantIndexes, "expected completed indexes %s, but got %s", wantIndexes, gotIndexes)
 	})
 
 	/*
@@ -256,7 +259,7 @@ var _ = SIGDescribe("Job", func() {
 		job, err := e2ejob.CreateJob(f.ClientSet, f.Namespace.Name, job)
 		framework.ExpectNoError(err, "failed to create job in namespace: %s", f.Namespace.Name)
 		ginkgo.By("Ensuring job past active deadline")
-		err = waitForJobFailure(f.ClientSet, f.Namespace.Name, job.Name, time.Duration(activeDeadlineSeconds+10)*time.Second, "DeadlineExceeded")
+		err = waitForJobFailure(f.ClientSet, f.Namespace.Name, job.Name, time.Duration(activeDeadlineSeconds+15)*time.Second, "DeadlineExceeded")
 		framework.ExpectNoError(err, "failed to ensure job past active deadline in namespace: %s", f.Namespace.Name)
 	})
 

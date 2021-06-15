@@ -51,7 +51,15 @@ var (
 		the .bash_profile.
 
 		Detailed instructions on how to do this are available here:
-		https://kubernetes.io/docs/tasks/tools/install-kubectl/#enabling-shell-autocompletion
+
+        for macOS:
+        https://kubernetes.io/docs/tasks/tools/install-kubectl-macos/#enable-shell-autocompletion
+
+        for linux:
+        https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/#enable-shell-autocompletion
+
+        for windows:
+        https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/#enable-shell-autocompletion
 
 		Note for zsh users: [1] zsh completions are only supported in versions of zsh >= 5.2`))
 
@@ -106,8 +114,7 @@ func NewCmdCompletion(out io.Writer, boilerPlate string) *cobra.Command {
 		Long:                  completionLong,
 		Example:               completionExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := RunCompletion(out, boilerPlate, cmd, args)
-			cmdutil.CheckErr(err)
+			cmdutil.CheckErr(RunCompletion(out, boilerPlate, cmd, args))
 		},
 		ValidArgs: shells,
 	}

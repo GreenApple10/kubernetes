@@ -153,12 +153,12 @@ func (us uniformScenario) exercise(t *testing.T) {
 type uniformScenarioState struct {
 	t *testing.T
 	uniformScenario
-	startTime                          time.Time
-	doSplit                            bool
-	integrators                        []fq.Integrator
-	failedCount                        uint64
-	expectedInqueue, expectedExecuting string
-	executions, rejects                []int32
+	startTime                                                    time.Time
+	doSplit                                                      bool
+	integrators                                                  []fq.Integrator
+	failedCount                                                  uint64
+	expectedInqueue, expectedExecuting, expectedConcurrencyInUse string
+	executions, rejects                                          []int32
 }
 
 func (uss *uniformScenarioState) exercise() {
@@ -226,7 +226,7 @@ func (ust *uniformScenarioThread) callK(k int) {
 	if k >= ust.nCalls {
 		return
 	}
-	req, idle := ust.uss.qs.StartRequest(context.Background(), ust.uc.hash, "", ust.fsName, ust.uss.name, []int{ust.i, ust.j, k}, nil)
+	req, idle := ust.uss.qs.StartRequest(context.Background(), 1, ust.uc.hash, "", ust.fsName, ust.uss.name, []int{ust.i, ust.j, k}, nil)
 	ust.uss.t.Logf("%s: %d, %d, %d got req=%p, idle=%v", ust.uss.clk.Now().Format(nsTimeFmt), ust.i, ust.j, k, req, idle)
 	if req == nil {
 		atomic.AddUint64(&ust.uss.failedCount, 1)
@@ -313,6 +313,7 @@ func (uss *uniformScenarioState) finalReview() {
 		fsName := fmt.Sprintf("client%d", i)
 		if atomic.AddInt32(&uss.executions[i], 0) > 0 {
 			uss.expectedExecuting = uss.expectedExecuting + fmt.Sprintf(`				apiserver_flowcontrol_current_executing_requests{flow_schema=%q,priority_level=%q} 0%s`, fsName, uss.name, "\n")
+			uss.expectedConcurrencyInUse = uss.expectedConcurrencyInUse + fmt.Sprintf(`				apiserver_flowcontrol_request_concurrency_in_use{flow_schema=%q,priority_level=%q} 0%s`, fsName, uss.name, "\n")
 		}
 		if atomic.AddInt32(&uss.rejects[i], 0) > 0 {
 			expectedRejects = expectedRejects + fmt.Sprintf(`				apiserver_flowcontrol_rejected_requests_total{flow_schema=%q,priority_level=%q,reason=%q} %d%s`, fsName, uss.name, uss.rejectReason, uss.rejects[i], "\n")
@@ -324,6 +325,18 @@ func (uss *uniformScenarioState) finalReview() {
 				# TYPE apiserver_flowcontrol_current_executing_requests gauge
 ` + uss.expectedExecuting
 		err := metrics.GatherAndCompare(e, "apiserver_flowcontrol_current_executing_requests")
+		if err != nil {
+			uss.t.Error(err)
+		} else {
+			uss.t.Log("Success with" + e)
+		}
+	}
+	if uss.evalExecutingMetrics && len(uss.expectedConcurrencyInUse) > 0 {
+		e := `
+				# HELP apiserver_flowcontrol_request_concurrency_in_use [ALPHA] Concurrency (number of seats) occupided by the currently executing requests in the API Priority and Fairness system
+				# TYPE apiserver_flowcontrol_request_concurrency_in_use gauge
+` + uss.expectedConcurrencyInUse
+		err := metrics.GatherAndCompare(e, "apiserver_flowcontrol_request_concurrency_in_use")
 		if err != nil {
 			uss.t.Error(err)
 		} else {
@@ -658,7 +671,7 @@ func TestContextCancel(t *testing.T) {
 	ctx1 := context.Background()
 	b2i := map[bool]int{false: 0, true: 1}
 	var qnc [2][2]int32
-	req1, _ := qs.StartRequest(ctx1, 1, "", "fs1", "test", "one", func(inQueue bool) { atomic.AddInt32(&qnc[0][b2i[inQueue]], 1) })
+	req1, _ := qs.StartRequest(ctx1, 1, 1, "", "fs1", "test", "one", func(inQueue bool) { atomic.AddInt32(&qnc[0][b2i[inQueue]], 1) })
 	if req1 == nil {
 		t.Error("Request rejected")
 		return
@@ -686,7 +699,7 @@ func TestContextCancel(t *testing.T) {
 			counter.Add(1)
 			cancel2()
 		}()
-		req2, idle2a := qs.StartRequest(ctx2, 2, "", "fs2", "test", "two", func(inQueue bool) { atomic.AddInt32(&qnc[1][b2i[inQueue]], 1) })
+		req2, idle2a := qs.StartRequest(ctx2, 1, 2, "", "fs2", "test", "two", func(inQueue bool) { atomic.AddInt32(&qnc[1][b2i[inQueue]], 1) })
 		if idle2a {
 			t.Error("2nd StartRequest returned idle")
 		}
@@ -745,7 +758,7 @@ func TestTotalRequestsExecutingWithPanic(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	req, _ := qs.StartRequest(ctx, 1, "", "fs", "test", "one", func(inQueue bool) {})
+	req, _ := qs.StartRequest(ctx, 1, 1, "", "fs", "test", "one", func(inQueue bool) {})
 	if req == nil {
 		t.Fatal("expected a Request object from StartRequest, but got nil")
 	}

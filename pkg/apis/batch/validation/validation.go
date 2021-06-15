@@ -88,6 +88,16 @@ func ValidateJob(job *batch.Job, opts apivalidation.PodValidationOptions) field.
 	allErrs := apivalidation.ValidateObjectMeta(&job.ObjectMeta, true, apivalidation.ValidateReplicationControllerName, field.NewPath("metadata"))
 	allErrs = append(allErrs, ValidateGeneratedSelector(job)...)
 	allErrs = append(allErrs, ValidateJobSpec(&job.Spec, field.NewPath("spec"), opts)...)
+	if job.Spec.CompletionMode != nil && *job.Spec.CompletionMode == batch.IndexedCompletion && job.Spec.Completions != nil && *job.Spec.Completions > 0 {
+		// For indexed job, the job controller appends a suffix (`-$INDEX`)
+		// to the pod hostname when indexed job create pods.
+		// The index could be maximum `.spec.completions-1`
+		// If we don't validate this here, the indexed job will fail to create pods later.
+		maximumPodHostname := fmt.Sprintf("%s-%d", job.ObjectMeta.Name, *job.Spec.Completions-1)
+		if errs := apimachineryvalidation.IsDNS1123Label(maximumPodHostname); len(errs) > 0 {
+			allErrs = append(allErrs, field.Invalid(field.NewPath("metadata").Child("name"), job.ObjectMeta.Name, fmt.Sprintf("will not able to create pod with invalid DNS label: %s", maximumPodHostname)))
+		}
+	}
 	return allErrs
 }
 
@@ -129,12 +139,12 @@ func validateJobSpec(spec *batch.JobSpec, fldPath *field.Path, opts apivalidatio
 	if spec.TTLSecondsAfterFinished != nil {
 		allErrs = append(allErrs, apivalidation.ValidateNonnegativeField(int64(*spec.TTLSecondsAfterFinished), fldPath.Child("ttlSecondsAfterFinished"))...)
 	}
-	// CompletionMode might be empty when IndexedJob feature gate is disabled.
-	if spec.CompletionMode != "" {
-		if spec.CompletionMode != batch.NonIndexedCompletion && spec.CompletionMode != batch.IndexedCompletion {
+	// CompletionMode might be nil when IndexedJob feature gate is disabled.
+	if spec.CompletionMode != nil {
+		if *spec.CompletionMode != batch.NonIndexedCompletion && *spec.CompletionMode != batch.IndexedCompletion {
 			allErrs = append(allErrs, field.NotSupported(fldPath.Child("completionMode"), spec.CompletionMode, []string{string(batch.NonIndexedCompletion), string(batch.IndexedCompletion)}))
 		}
-		if spec.CompletionMode == batch.IndexedCompletion {
+		if *spec.CompletionMode == batch.IndexedCompletion {
 			if spec.Completions == nil {
 				allErrs = append(allErrs, field.Required(fldPath.Child("completions"), fmt.Sprintf("when completion mode is %s", batch.IndexedCompletion)))
 			}

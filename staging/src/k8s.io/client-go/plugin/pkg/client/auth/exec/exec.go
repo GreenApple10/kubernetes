@@ -263,8 +263,9 @@ func (a *Authenticator) UpdateTransportConfig(c *transport.Config) error {
 	// setting up the transport, as that triggers the exec action if the server is
 	// also configured to allow client certificates for authentication. For requests
 	// like "kubectl get --token (token) pods" we should assume the intention is to
-	// use the provided token for authentication.
-	if c.HasTokenAuth() {
+	// use the provided token for authentication. The same can be said for when the
+	// user specifies basic auth.
+	if c.HasTokenAuth() || c.HasBasicAuth() {
 		return nil
 	}
 
@@ -461,7 +462,7 @@ func (a *Authenticator) refreshCredsLocked(r *clientauthentication.Response) err
 	if oldCreds != nil && !reflect.DeepEqual(oldCreds.cert, a.cachedCreds.cert) {
 		// Can be nil if the exec auth plugin only returned token auth.
 		if oldCreds.cert != nil && oldCreds.cert.Leaf != nil {
-			metrics.ClientCertRotationAge.Observe(time.Now().Sub(oldCreds.cert.Leaf.NotBefore))
+			metrics.ClientCertRotationAge.Observe(time.Since(oldCreds.cert.Leaf.NotBefore))
 		}
 		a.connTracker.CloseAll()
 	}

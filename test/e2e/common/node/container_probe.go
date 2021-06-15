@@ -214,7 +214,7 @@ var _ = SIGDescribe("Probing container", func() {
 		Testname: Pod liveness probe, container exec timeout, restart
 		Description: A Pod is created with liveness probe with a Exec action on the Pod. If the liveness probe call does not return within the timeout specified, liveness probe MUST restart the Pod.
 	*/
-	ginkgo.It("should be restarted with an exec liveness probe with timeout [NodeConformance]", func() {
+	ginkgo.It("should be restarted with an exec liveness probe with timeout [MinimumKubeletVersion:1.20] [NodeConformance]", func() {
 		// The ExecProbeTimeout feature gate exists to allow backwards-compatibility with pre-1.20 cluster behaviors, where livenessProbe timeouts were ignored
 		// If ExecProbeTimeout feature gate is disabled, timeout enforcement for exec livenessProbes is disabled, so we should skip this test
 		e2eskipper.SkipUnlessExecProbeTimeoutEnabled()
@@ -234,7 +234,7 @@ var _ = SIGDescribe("Probing container", func() {
 		Testname: Pod readiness probe, container exec timeout, not ready
 		Description: A Pod is created with readiness probe with a Exec action on the Pod. If the readiness probe call does not return within the timeout specified, readiness probe MUST not be Ready.
 	*/
-	ginkgo.It("should not be ready with an exec readiness probe timeout [NodeConformance]", func() {
+	ginkgo.It("should not be ready with an exec readiness probe timeout [MinimumKubeletVersion:1.20] [NodeConformance]", func() {
 		cmd := []string{"/bin/sh", "-c", "sleep 600"}
 		readinessProbe := &v1.Probe{
 			Handler:             execHandler([]string{"/bin/sh", "-c", "sleep 10"}),
@@ -244,6 +244,26 @@ var _ = SIGDescribe("Probing container", func() {
 		}
 		pod := busyBoxPodSpec(readinessProbe, nil, cmd)
 		runReadinessFailTest(f, pod, time.Minute)
+	})
+
+	/*
+		Release: v1.21
+		Testname: Pod liveness probe, container exec timeout, restart
+		Description: A Pod is created with liveness probe with a Exec action on the Pod. If the liveness probe call does not return within the timeout specified, liveness probe MUST restart the Pod. When ExecProbeTimeout feature gate is disabled and cluster is using dockershim, the timeout is ignored BUT a failing liveness probe MUST restart the Pod.
+	*/
+	ginkgo.It("should be restarted with a failing exec liveness probe that took longer than the timeout", func() {
+		// The ExecProbeTimeout feature gate exists to allow backwards-compatibility with pre-1.20 cluster behaviors using dockershim, where livenessProbe timeouts were ignored
+		// If ExecProbeTimeout feature gate is disabled on a dockershim cluster, timeout enforcement for exec livenessProbes is disabled, but a failing liveness probe MUST still trigger a restart
+		// Note ExecProbeTimeout=false is not recommended for non-dockershim clusters (e.g., containerd), and this test will fail if run against such a configuration
+		cmd := []string{"/bin/sh", "-c", "sleep 600"}
+		livenessProbe := &v1.Probe{
+			Handler:             execHandler([]string{"/bin/sh", "-c", "sleep 10 & exit 1"}),
+			InitialDelaySeconds: 15,
+			TimeoutSeconds:      1,
+			FailureThreshold:    1,
+		}
+		pod := busyBoxPodSpec(nil, livenessProbe, cmd)
+		RunLivenessTest(f, pod, 1, defaultObservationTimeout)
 	})
 
 	/*
@@ -378,11 +398,14 @@ var _ = SIGDescribe("Probing container", func() {
 		Description: A Pod is created with startup and readiness probes. The Container is started by creating /tmp/startup after 45 seconds, delaying the ready state by this amount of time. This is similar to the "Pod readiness probe, with initial delay" test.
 	*/
 	ginkgo.It("should be ready immediately after startupProbe succeeds", func() {
-		cmd := []string{"/bin/sh", "-c", "echo ok >/tmp/health; sleep 10; echo ok >/tmp/startup; sleep 600"}
+		// Probe workers sleep at Kubelet start for a random time which is at most PeriodSeconds
+		// this test requires both readiness and startup workers running before updating statuses
+		// to avoid flakes, ensure sleep before startup (22s) > readinessProbe.PeriodSeconds
+		cmd := []string{"/bin/sh", "-c", "echo ok >/tmp/health; sleep 22; echo ok >/tmp/startup; sleep 600"}
 		readinessProbe := &v1.Probe{
 			Handler:             execHandler([]string{"/bin/cat", "/tmp/health"}),
 			InitialDelaySeconds: 0,
-			PeriodSeconds:       60,
+			PeriodSeconds:       20,
 		}
 		startupProbe := &v1.Probe{
 			Handler:             execHandler([]string{"/bin/cat", "/tmp/startup"}),
@@ -419,6 +442,67 @@ var _ = SIGDescribe("Probing container", func() {
 		if readyIn > 5*time.Second {
 			framework.Failf("Pod became ready in %v, more than 5s after startupProbe succeeded. It means that the delay readiness probes were not initiated immediately after startup finished.", readyIn)
 		}
+	})
+
+	/*
+		Release: v1.21
+		Testname: Set terminationGracePeriodSeconds for livenessProbe
+		Description: A pod with a long terminationGracePeriod is created with a shorter livenessProbe-level terminationGracePeriodSeconds. We confirm the shorter termination period is used.
+	*/
+	ginkgo.It("should override timeoutGracePeriodSeconds when LivenessProbe field is set [Feature:ProbeTerminationGracePeriod]", func() {
+		pod := e2epod.NewAgnhostPod(f.Namespace.Name, "liveness-override-"+string(uuid.NewUUID()), nil, nil, nil, "/bin/sh", "-c", "sleep 1000")
+		longGracePeriod := int64(500)
+		pod.Spec.TerminationGracePeriodSeconds = &longGracePeriod
+
+		// probe will fail since pod has no http endpoints
+		shortGracePeriod := int64(5)
+		pod.Spec.Containers[0].LivenessProbe = &v1.Probe{
+			Handler: v1.Handler{
+				HTTPGet: &v1.HTTPGetAction{
+					Path: "/healthz",
+					Port: intstr.FromInt(8080),
+				},
+			},
+			InitialDelaySeconds:           10,
+			FailureThreshold:              1,
+			TerminationGracePeriodSeconds: &shortGracePeriod,
+		}
+
+		// 10s delay + 10s period + 5s grace period = 25s < 30s << pod-level timeout 500
+		RunLivenessTest(f, pod, 1, time.Second*30)
+	})
+
+	/*
+		Release: v1.21
+		Testname: Set terminationGracePeriodSeconds for startupProbe
+		Description: A pod with a long terminationGracePeriod is created with a shorter startupProbe-level terminationGracePeriodSeconds. We confirm the shorter termination period is used.
+	*/
+	ginkgo.It("should override timeoutGracePeriodSeconds when StartupProbe field is set [Feature:ProbeTerminationGracePeriod]", func() {
+		pod := e2epod.NewAgnhostPod(f.Namespace.Name, "startup-override-"+string(uuid.NewUUID()), nil, nil, nil, "/bin/sh", "-c", "sleep 1000")
+		longGracePeriod := int64(500)
+		pod.Spec.TerminationGracePeriodSeconds = &longGracePeriod
+
+		// startup probe will fail since pod will sleep for 1000s before becoming ready
+		shortGracePeriod := int64(5)
+		pod.Spec.Containers[0].StartupProbe = &v1.Probe{
+			Handler:                       execHandler([]string{"/bin/cat", "/tmp/startup"}),
+			InitialDelaySeconds:           10,
+			FailureThreshold:              1,
+			TerminationGracePeriodSeconds: &shortGracePeriod,
+		}
+		// liveness probe always succeeds
+		pod.Spec.Containers[0].LivenessProbe = &v1.Probe{
+			Handler: v1.Handler{
+				Exec: &v1.ExecAction{
+					Command: []string{"/bin/true"},
+				},
+			},
+			InitialDelaySeconds: 15,
+			FailureThreshold:    1,
+		}
+
+		// 10s delay + 10s period + 5s grace period = 25s < 30s << pod-level timeout 500
+		RunLivenessTest(f, pod, 1, time.Second*30)
 	})
 })
 

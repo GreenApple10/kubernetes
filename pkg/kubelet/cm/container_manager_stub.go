@@ -36,12 +36,13 @@ import (
 
 type containerManagerStub struct {
 	shouldResetExtendedResourceCapacity bool
+	extendedPluginResources             v1.ResourceList
 }
 
 var _ ContainerManager = &containerManagerStub{}
 
 func (cm *containerManagerStub) Start(_ *v1.Node, _ ActivePodsFunc, _ config.SourcesReady, _ status.PodStatusProvider, _ internalapi.RuntimeService) error {
-	klog.V(2).Infof("Starting stub container manager")
+	klog.V(2).InfoS("Starting stub container manager")
 	return nil
 }
 
@@ -87,7 +88,7 @@ func (cm *containerManagerStub) GetPluginRegistrationHandler() cache.PluginHandl
 }
 
 func (cm *containerManagerStub) GetDevicePluginResourceCapacity() (v1.ResourceList, v1.ResourceList, []string) {
-	return nil, nil, []string{}
+	return cm.extendedPluginResources, cm.extendedPluginResources, []string{}
 }
 
 func (cm *containerManagerStub) NewPodContainerManager() PodContainerManager {
@@ -144,4 +145,11 @@ func NewStubContainerManager() ContainerManager {
 
 func NewStubContainerManagerWithExtendedResource(shouldResetExtendedResourceCapacity bool) ContainerManager {
 	return &containerManagerStub{shouldResetExtendedResourceCapacity: shouldResetExtendedResourceCapacity}
+}
+
+func NewStubContainerManagerWithDevicePluginResource(extendedPluginResources v1.ResourceList) ContainerManager {
+	return &containerManagerStub{
+		shouldResetExtendedResourceCapacity: false,
+		extendedPluginResources:             extendedPluginResources,
+	}
 }
