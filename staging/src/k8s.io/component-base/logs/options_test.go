@@ -18,11 +18,13 @@ package logs
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
+
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/component-base/config"
 )
 
 func TestFlags(t *testing.T) {
@@ -34,7 +36,7 @@ func TestFlags(t *testing.T) {
 	fs.PrintDefaults()
 	want := `      --experimental-logging-sanitization   [Experimental] When enabled prevents logging of fields tagged as sensitive (passwords, keys, tokens).
                                             Runtime log sanitization may introduce significant computation overhead and therefore should not be enabled in production.
-      --logging-format string               Sets the log format. Permitted formats: "json", "text".
+      --logging-format string               Sets the log format. Permitted formats: "text".
                                             Non-default formats don't honor these flags: --add_dir_header, --alsologtostderr, --log_backtrace_at, --log_dir, --log_file, --log_file_max_size, --logtostderr, --one_output, --skip_headers, --skip_log_headers, --stderrthreshold, --vmodule, --log-flush-frequency.
                                             Non-default choices are currently alpha and subject to change without warning. (default "text")
 `
@@ -48,7 +50,7 @@ func TestOptions(t *testing.T) {
 		name string
 		args []string
 		want *Options
-		errs []error
+		errs field.ErrorList
 	}{
 		{
 			name: "Default log format",
@@ -60,27 +62,29 @@ func TestOptions(t *testing.T) {
 			want: NewOptions(),
 		},
 		{
-			name: "JSON log format",
-			args: []string{"--logging-format=json"},
-			want: &Options{
-				LogFormat: JSONLogFormat,
-			},
-		},
-		{
 			name: "log sanitization",
 			args: []string{"--experimental-logging-sanitization"},
 			want: &Options{
-				LogFormat:       DefaultLogFormat,
-				LogSanitization: true,
+				Config: config.LoggingConfiguration{
+					Format:       DefaultLogFormat,
+					Sanitization: true,
+				},
 			},
 		},
 		{
 			name: "Unsupported log format",
 			args: []string{"--logging-format=test"},
 			want: &Options{
-				LogFormat: "test",
+				Config: config.LoggingConfiguration{
+					Format: "test",
+				},
 			},
-			errs: []error{fmt.Errorf("unsupported log format: test")},
+			errs: field.ErrorList{&field.Error{
+				Type:     "FieldValueInvalid",
+				Field:    "format",
+				BadValue: "test",
+				Detail:   "Unsupported log format",
+			}},
 		},
 	}
 
@@ -95,7 +99,8 @@ func TestOptions(t *testing.T) {
 			}
 			errs := o.Validate()
 			if !assert.ElementsMatch(t, tc.errs, errs) {
-				t.Errorf("Wrong Validate() result for %q. expect %v, got %v", tc.name, tc.errs, errs)
+				t.Errorf("Wrong Validate() result for %q.\n expect:\t%+v\n got:\t%+v", tc.name, tc.errs, errs)
+
 			}
 		})
 	}

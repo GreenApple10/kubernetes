@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/clientv3/concurrency"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -61,8 +61,8 @@ AwEHoUQDQgAEH6cuzP8XuD5wal6wf9M6xDljTOPLX2i8uIp/C/ASqiIGUeeKQtX0
 /IR3qCXyThP/dbCiHrF3v1cuhBOHY8CLVg==
 -----END EC PRIVATE KEY-----`
 
-// StartRealMasterOrDie starts an API master that is appropriate for use in tests that require one of every resource
-func StartRealMasterOrDie(t *testing.T, configFuncs ...func(*options.ServerRunOptions)) *Master {
+// StartRealAPIServerOrDie starts an API server that is appropriate for use in tests that require one of every resource
+func StartRealAPIServerOrDie(t *testing.T, configFuncs ...func(*options.ServerRunOptions)) *Master {
 	certDir, err := ioutil.TempDir("", t.Name())
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func StartRealMasterOrDie(t *testing.T, configFuncs ...func(*options.ServerRunOp
 		// Catch panics that occur in this go routine so we get a comprehensible failure
 		defer func() {
 			if err := recover(); err != nil {
-				t.Errorf("Unexpected panic trying to start API master: %#v", err)
+				t.Errorf("Unexpected panic trying to start API server: %#v", err)
 			}
 		}()
 

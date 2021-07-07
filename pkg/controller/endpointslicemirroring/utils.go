@@ -87,9 +87,9 @@ func newEndpointSlice(endpoints *corev1.Endpoints, ports []discovery.EndpointPor
 	epSlice.Labels[discovery.LabelServiceName] = endpoints.Name
 	epSlice.Labels[discovery.LabelManagedBy] = controllerName
 
-	// clone all annotations but EndpointsLastChangeTriggerTime
+	// clone all annotations but EndpointsLastChangeTriggerTime and LastAppliedConfigAnnotation
 	for annotation, val := range endpoints.Annotations {
-		if annotation == corev1.EndpointsLastChangeTriggerTime {
+		if annotation == corev1.EndpointsLastChangeTriggerTime || annotation == corev1.LastAppliedConfigAnnotation {
 			continue
 		}
 		epSlice.Annotations[annotation] = val
@@ -257,4 +257,17 @@ func cloneAndRemoveKeys(a map[string]string, keys ...string) map[string]string {
 		delete(newMap, key)
 	}
 	return newMap
+}
+
+// managedByChanged returns true if one of the provided EndpointSlices is
+// managed by the EndpointSlice controller while the other is not.
+func managedByChanged(endpointSlice1, endpointSlice2 *discovery.EndpointSlice) bool {
+	return managedByController(endpointSlice1) != managedByController(endpointSlice2)
+}
+
+// managedByController returns true if the controller of the provided
+// EndpointSlices is the EndpointSlice controller.
+func managedByController(endpointSlice *discovery.EndpointSlice) bool {
+	managedBy, _ := endpointSlice.Labels[discovery.LabelManagedBy]
+	return managedBy == controllerName
 }

@@ -26,13 +26,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/apimachinery/pkg/util/wait"
 	bootstrapapi "k8s.io/cluster-bootstrap/token/api"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/pkg/errors"
 )
 
 const (
@@ -325,7 +325,7 @@ const (
 	CoreDNSImageName = "coredns"
 
 	// CoreDNSVersion is the version of CoreDNS to be deployed if it is used
-	CoreDNSVersion = "v1.8.0"
+	CoreDNSVersion = "v1.8.4"
 
 	// ClusterConfigurationKind is the string kind value for the ClusterConfiguration struct
 	ClusterConfigurationKind = "ClusterConfiguration"

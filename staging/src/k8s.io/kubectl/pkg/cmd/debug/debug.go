@@ -124,7 +124,7 @@ type DebugOptions struct {
 	attachChanged         bool
 	shareProcessedChanged bool
 
-	podClient corev1client.PodsGetter
+	podClient corev1client.CoreV1Interface
 
 	genericclioptions.IOStreams
 }
@@ -275,8 +275,17 @@ func (o *DebugOptions) Validate(cmd *cobra.Command) error {
 	}
 
 	// TargetContainer
-	if len(o.TargetContainer) > 0 && len(o.CopyTo) > 0 {
-		return fmt.Errorf("--target is incompatible with --copy-to. Use --share-processes instead.")
+	if len(o.TargetContainer) > 0 {
+		if len(o.CopyTo) > 0 {
+			return fmt.Errorf("--target is incompatible with --copy-to. Use --share-processes instead.")
+		}
+		if !o.Quiet {
+			// If the runtime doesn't support container namespace targeting this will fail silently, which has caused
+			// some confusion (ex: https://issues.k8s.io/98362), so print a warning. This can be removed when
+			// EphemeralContainers are generally available.
+			fmt.Fprintf(o.Out, "Targeting container %q. If you don't see processes from this container it may be because the container runtime doesn't support this feature.\n", o.TargetContainer)
+			// TODO(verb): Add a list of supported container runtimes to https://kubernetes.io/docs/concepts/workloads/pods/ephemeral-containers/ and then link here.
+		}
 	}
 
 	// TTY
@@ -413,10 +422,52 @@ func (o *DebugOptions) debugByEphemeralContainer(ctx context.Context, pod *corev
 		if serr, ok := err.(*errors.StatusError); ok && serr.Status().Reason == metav1.StatusReasonNotFound && serr.ErrStatus.Details.Name == "" {
 			return nil, "", fmt.Errorf("ephemeral containers are disabled for this cluster (error from server: %q).", err)
 		}
+
+		// The Kind used for the /ephemeralcontainers subresource changed in 1.22. When presented with an unexpected
+		// Kind the api server will respond with a not-registered error. When this happens we can optimistically try
+		// using the old API.
+		if runtime.IsNotRegisteredError(err) {
+			klog.V(1).Infof("Falling back to legacy API because server returned error: %v", err)
+			return o.debugByEphemeralContainerLegacy(ctx, pod, debugContainer)
+		}
+
 		return nil, "", err
 	}
 
 	return result, debugContainer.Name, nil
+}
+
+// debugByEphemeralContainerLegacy adds debugContainer as an ephemeral container using the pre-1.22 /ephemeralcontainers API
+// This may be removed when we no longer wish to support releases prior to 1.22.
+func (o *DebugOptions) debugByEphemeralContainerLegacy(ctx context.Context, pod *corev1.Pod, debugContainer *corev1.EphemeralContainer) (*corev1.Pod, string, error) {
+	// We no longer have the v1.EphemeralContainers Kind since it was removed in 1.22, but
+	// we can present a JSON 6902 patch that the api server will apply.
+	patch, err := json.Marshal([]map[string]interface{}{{
+		"op":    "add",
+		"path":  "/ephemeralContainers/-",
+		"value": debugContainer,
+	}})
+	if err != nil {
+		return nil, "", fmt.Errorf("error creating JSON 6902 patch for old /ephemeralcontainers API: %s", err)
+	}
+
+	result := o.podClient.RESTClient().Patch(types.JSONPatchType).
+		Namespace(pod.Namespace).
+		Resource("pods").
+		Name(pod.Name).
+		SubResource("ephemeralcontainers").
+		Body(patch).
+		Do(ctx)
+	if err := result.Error(); err != nil {
+		return nil, "", err
+	}
+
+	newPod, err := o.podClient.Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, "", err
+	}
+
+	return newPod, debugContainer.Name, nil
 }
 
 // debugByCopy runs a copy of the target Pod with a debug container added or an original container modified

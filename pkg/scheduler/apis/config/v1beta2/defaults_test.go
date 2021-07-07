@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -31,8 +32,87 @@ import (
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/kube-scheduler/config/v1beta2"
 	"k8s.io/kubernetes/pkg/features"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/names"
 	"k8s.io/utils/pointer"
 )
+
+var pluginConfigs = []v1beta2.PluginConfig{
+	{
+		Name: "DefaultPreemption",
+		Args: runtime.RawExtension{
+			Object: &v1beta2.DefaultPreemptionArgs{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "DefaultPreemptionArgs",
+					APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+				},
+				MinCandidateNodesPercentage: pointer.Int32Ptr(10),
+				MinCandidateNodesAbsolute:   pointer.Int32Ptr(100),
+			}},
+	},
+	{
+		Name: "InterPodAffinity",
+		Args: runtime.RawExtension{
+			Object: &v1beta2.InterPodAffinityArgs{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "InterPodAffinityArgs",
+					APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+				},
+				HardPodAffinityWeight: pointer.Int32Ptr(1),
+			}},
+	},
+	{
+		Name: "NodeAffinity",
+		Args: runtime.RawExtension{Object: &v1beta2.NodeAffinityArgs{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "NodeAffinityArgs",
+				APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+			},
+		}},
+	},
+	{
+		Name: "NodeResourcesBalancedAllocation",
+		Args: runtime.RawExtension{Object: &v1beta2.NodeResourcesBalancedAllocationArgs{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "NodeResourcesBalancedAllocationArgs",
+				APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+			},
+			Resources: []v1beta2.ResourceSpec{{Name: "cpu", Weight: 1}, {Name: "memory", Weight: 1}},
+		}},
+	},
+	{
+		Name: "NodeResourcesFit",
+		Args: runtime.RawExtension{Object: &v1beta2.NodeResourcesFitArgs{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "NodeResourcesFitArgs",
+				APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+			},
+			ScoringStrategy: &v1beta2.ScoringStrategy{
+				Type:      v1beta2.LeastAllocated,
+				Resources: []v1beta2.ResourceSpec{{Name: "cpu", Weight: 1}, {Name: "memory", Weight: 1}},
+			},
+		}},
+	},
+	{
+		Name: "PodTopologySpread",
+		Args: runtime.RawExtension{Object: &v1beta2.PodTopologySpreadArgs{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "PodTopologySpreadArgs",
+				APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+			},
+			DefaultingType: v1beta2.SystemDefaulting,
+		}},
+	},
+	{
+		Name: "VolumeBinding",
+		Args: runtime.RawExtension{Object: &v1beta2.VolumeBindingArgs{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "VolumeBindingArgs",
+				APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+			},
+			BindTimeoutSeconds: pointer.Int64Ptr(600),
+		}},
+	},
+}
 
 func TestSchedulerDefaults(t *testing.T) {
 	enable := true
@@ -70,20 +150,18 @@ func TestSchedulerDefaults(t *testing.T) {
 				PodInitialBackoffSeconds: pointer.Int64Ptr(1),
 				PodMaxBackoffSeconds:     pointer.Int64Ptr(10),
 				Profiles: []v1beta2.KubeSchedulerProfile{
-					{SchedulerName: pointer.StringPtr("default-scheduler")},
+					{
+						Plugins:       getDefaultPlugins(),
+						PluginConfig:  pluginConfigs,
+						SchedulerName: pointer.StringPtr("default-scheduler"),
+					},
 				},
 			},
 		},
 		{
 			name: "no scheduler name",
 			config: &v1beta2.KubeSchedulerConfiguration{
-				Profiles: []v1beta2.KubeSchedulerProfile{
-					{
-						PluginConfig: []v1beta2.PluginConfig{
-							{Name: "FooPlugin"},
-						},
-					},
-				},
+				Profiles: []v1beta2.KubeSchedulerProfile{{}},
 			},
 			expected: &v1beta2.KubeSchedulerConfiguration{
 				Parallelism:        pointer.Int32Ptr(16),
@@ -113,10 +191,8 @@ func TestSchedulerDefaults(t *testing.T) {
 				Profiles: []v1beta2.KubeSchedulerProfile{
 					{
 						SchedulerName: pointer.StringPtr("default-scheduler"),
-						PluginConfig: []v1beta2.PluginConfig{
-							{Name: "FooPlugin"},
-						},
-					},
+						Plugins:       getDefaultPlugins(),
+						PluginConfig:  pluginConfigs},
 				},
 			},
 		},
@@ -136,6 +212,9 @@ func TestSchedulerDefaults(t *testing.T) {
 							Bind: v1beta2.PluginSet{
 								Enabled: []v1beta2.Plugin{
 									{Name: "BarPlugin"},
+								},
+								Disabled: []v1beta2.Plugin{
+									{Name: names.DefaultBinder},
 								},
 							},
 						},
@@ -169,19 +248,165 @@ func TestSchedulerDefaults(t *testing.T) {
 				PodMaxBackoffSeconds:     pointer.Int64Ptr(10),
 				Profiles: []v1beta2.KubeSchedulerProfile{
 					{
+						Plugins: getDefaultPlugins(),
 						PluginConfig: []v1beta2.PluginConfig{
 							{Name: "FooPlugin"},
+							{
+								Name: "DefaultPreemption",
+								Args: runtime.RawExtension{
+									Object: &v1beta2.DefaultPreemptionArgs{
+										TypeMeta: metav1.TypeMeta{
+											Kind:       "DefaultPreemptionArgs",
+											APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+										},
+										MinCandidateNodesPercentage: pointer.Int32Ptr(10),
+										MinCandidateNodesAbsolute:   pointer.Int32Ptr(100),
+									}},
+							},
+							{
+								Name: "InterPodAffinity",
+								Args: runtime.RawExtension{
+									Object: &v1beta2.InterPodAffinityArgs{
+										TypeMeta: metav1.TypeMeta{
+											Kind:       "InterPodAffinityArgs",
+											APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+										},
+										HardPodAffinityWeight: pointer.Int32Ptr(1),
+									}},
+							},
+							{
+								Name: "NodeAffinity",
+								Args: runtime.RawExtension{Object: &v1beta2.NodeAffinityArgs{
+									TypeMeta: metav1.TypeMeta{
+										Kind:       "NodeAffinityArgs",
+										APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+									},
+								}},
+							},
+							{
+								Name: "NodeResourcesBalancedAllocation",
+								Args: runtime.RawExtension{Object: &v1beta2.NodeResourcesBalancedAllocationArgs{
+									TypeMeta: metav1.TypeMeta{
+										Kind:       "NodeResourcesBalancedAllocationArgs",
+										APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+									},
+									Resources: []v1beta2.ResourceSpec{{Name: "cpu", Weight: 1}, {Name: "memory", Weight: 1}},
+								}},
+							},
+							{
+								Name: "NodeResourcesFit",
+								Args: runtime.RawExtension{Object: &v1beta2.NodeResourcesFitArgs{
+									TypeMeta: metav1.TypeMeta{
+										Kind:       "NodeResourcesFitArgs",
+										APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+									},
+									ScoringStrategy: &v1beta2.ScoringStrategy{
+										Type:      v1beta2.LeastAllocated,
+										Resources: []v1beta2.ResourceSpec{{Name: "cpu", Weight: 1}, {Name: "memory", Weight: 1}},
+									},
+								}},
+							},
+							{
+								Name: "PodTopologySpread",
+								Args: runtime.RawExtension{Object: &v1beta2.PodTopologySpreadArgs{
+									TypeMeta: metav1.TypeMeta{
+										Kind:       "PodTopologySpreadArgs",
+										APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+									},
+									DefaultingType: v1beta2.SystemDefaulting,
+								}},
+							},
+							{
+								Name: "VolumeBinding",
+								Args: runtime.RawExtension{Object: &v1beta2.VolumeBindingArgs{
+									TypeMeta: metav1.TypeMeta{
+										Kind:       "VolumeBindingArgs",
+										APIVersion: "kubescheduler.config.k8s.io/v1beta2",
+									},
+									BindTimeoutSeconds: pointer.Int64Ptr(600),
+								}},
+							},
 						},
 					},
 					{
 						SchedulerName: pointer.StringPtr("custom-scheduler"),
 						Plugins: &v1beta2.Plugins{
+							QueueSort: v1beta2.PluginSet{
+								Enabled: []v1beta2.Plugin{
+									{Name: names.PrioritySort},
+								},
+							},
+							PreFilter: v1beta2.PluginSet{
+								Enabled: []v1beta2.Plugin{
+									{Name: names.NodeResourcesFit},
+									{Name: names.NodePorts},
+									{Name: names.VolumeRestrictions},
+									{Name: names.PodTopologySpread},
+									{Name: names.InterPodAffinity},
+									{Name: names.VolumeBinding},
+									{Name: names.NodeAffinity},
+								},
+							},
+							Filter: v1beta2.PluginSet{
+								Enabled: []v1beta2.Plugin{
+									{Name: names.NodeUnschedulable},
+									{Name: names.NodeName},
+									{Name: names.TaintToleration},
+									{Name: names.NodeAffinity},
+									{Name: names.NodePorts},
+									{Name: names.NodeResourcesFit},
+									{Name: names.VolumeRestrictions},
+									{Name: names.EBSLimits},
+									{Name: names.GCEPDLimits},
+									{Name: names.NodeVolumeLimits},
+									{Name: names.AzureDiskLimits},
+									{Name: names.VolumeBinding},
+									{Name: names.VolumeZone},
+									{Name: names.PodTopologySpread},
+									{Name: names.InterPodAffinity},
+								},
+							},
+							PostFilter: v1beta2.PluginSet{
+								Enabled: []v1beta2.Plugin{
+									{Name: names.DefaultPreemption},
+								},
+							},
+							PreScore: v1beta2.PluginSet{
+								Enabled: []v1beta2.Plugin{
+									{Name: names.InterPodAffinity},
+									{Name: names.PodTopologySpread},
+									{Name: names.TaintToleration},
+									{Name: names.NodeAffinity},
+								},
+							},
+							Score: v1beta2.PluginSet{
+								Enabled: []v1beta2.Plugin{
+									{Name: names.NodeResourcesBalancedAllocation, Weight: pointer.Int32Ptr(1)},
+									{Name: names.ImageLocality, Weight: pointer.Int32Ptr(1)},
+									{Name: names.InterPodAffinity, Weight: pointer.Int32Ptr(1)},
+									{Name: names.NodeResourcesFit, Weight: pointer.Int32Ptr(1)},
+									{Name: names.NodeAffinity, Weight: pointer.Int32Ptr(1)},
+									{Name: names.PodTopologySpread, Weight: pointer.Int32Ptr(2)},
+									{Name: names.TaintToleration, Weight: pointer.Int32Ptr(1)},
+								},
+							},
+							Reserve: v1beta2.PluginSet{
+								Enabled: []v1beta2.Plugin{
+									{Name: names.VolumeBinding},
+								},
+							},
+							PreBind: v1beta2.PluginSet{
+								Enabled: []v1beta2.Plugin{
+									{Name: names.VolumeBinding},
+								},
+							},
 							Bind: v1beta2.PluginSet{
 								Enabled: []v1beta2.Plugin{
 									{Name: "BarPlugin"},
 								},
 							},
 						},
+						PluginConfig: pluginConfigs,
 					},
 				},
 			},
@@ -219,7 +444,11 @@ func TestSchedulerDefaults(t *testing.T) {
 				PodInitialBackoffSeconds: pointer.Int64Ptr(1),
 				PodMaxBackoffSeconds:     pointer.Int64Ptr(10),
 				Profiles: []v1beta2.KubeSchedulerProfile{
-					{SchedulerName: pointer.StringPtr("default-scheduler")},
+					{
+						Plugins:       getDefaultPlugins(),
+						PluginConfig:  pluginConfigs,
+						SchedulerName: pointer.StringPtr("default-scheduler"),
+					},
 				},
 			},
 		},
@@ -255,7 +484,11 @@ func TestSchedulerDefaults(t *testing.T) {
 				PodInitialBackoffSeconds: pointer.Int64Ptr(1),
 				PodMaxBackoffSeconds:     pointer.Int64Ptr(10),
 				Profiles: []v1beta2.KubeSchedulerProfile{
-					{SchedulerName: pointer.StringPtr("default-scheduler")},
+					{
+						Plugins:       getDefaultPlugins(),
+						PluginConfig:  pluginConfigs,
+						SchedulerName: pointer.StringPtr("default-scheduler"),
+					},
 				},
 			},
 		},
@@ -291,7 +524,11 @@ func TestSchedulerDefaults(t *testing.T) {
 				PodInitialBackoffSeconds: pointer.Int64Ptr(1),
 				PodMaxBackoffSeconds:     pointer.Int64Ptr(10),
 				Profiles: []v1beta2.KubeSchedulerProfile{
-					{SchedulerName: pointer.StringPtr("default-scheduler")},
+					{
+						Plugins:       getDefaultPlugins(),
+						PluginConfig:  pluginConfigs,
+						SchedulerName: pointer.StringPtr("default-scheduler"),
+					},
 				},
 			},
 		},
@@ -326,7 +563,11 @@ func TestSchedulerDefaults(t *testing.T) {
 				PodInitialBackoffSeconds: pointer.Int64Ptr(1),
 				PodMaxBackoffSeconds:     pointer.Int64Ptr(10),
 				Profiles: []v1beta2.KubeSchedulerProfile{
-					{SchedulerName: pointer.StringPtr("default-scheduler")},
+					{
+						Plugins:       getDefaultPlugins(),
+						PluginConfig:  pluginConfigs,
+						SchedulerName: pointer.StringPtr("default-scheduler"),
+					},
 				},
 			},
 		},
@@ -392,71 +633,56 @@ func TestPluginArgsDefaults(t *testing.T) {
 			},
 		},
 		{
-			name: "NodeResourcesLeastAllocatedArgs resources empty",
-			in:   &v1beta2.NodeResourcesLeastAllocatedArgs{},
-			want: &v1beta2.NodeResourcesLeastAllocatedArgs{
+			name: "NodeResourcesBalancedAllocationArgs resources empty",
+			in:   &v1beta2.NodeResourcesBalancedAllocationArgs{},
+			want: &v1beta2.NodeResourcesBalancedAllocationArgs{
 				Resources: []v1beta2.ResourceSpec{
-					{Name: "cpu", Weight: 1},
-					{Name: "memory", Weight: 1},
+					{Name: "cpu", Weight: 1}, {Name: "memory", Weight: 1},
 				},
 			},
 		},
 		{
-			name: "NodeResourcesLeastAllocatedArgs resources with value",
-			in: &v1beta2.NodeResourcesLeastAllocatedArgs{
+			name: "NodeResourcesBalancedAllocationArgs with scalar resource",
+			in: &v1beta2.NodeResourcesBalancedAllocationArgs{
 				Resources: []v1beta2.ResourceSpec{
-					{Name: "resource", Weight: 2},
+					{Name: "scalar.io/scalar1", Weight: 1},
 				},
 			},
-			want: &v1beta2.NodeResourcesLeastAllocatedArgs{
+			want: &v1beta2.NodeResourcesBalancedAllocationArgs{
 				Resources: []v1beta2.ResourceSpec{
-					{Name: "resource", Weight: 2},
-				},
-			},
-		},
-		{
-			name: "NodeResourcesMostAllocatedArgs resources empty",
-			in:   &v1beta2.NodeResourcesMostAllocatedArgs{},
-			want: &v1beta2.NodeResourcesMostAllocatedArgs{
-				Resources: []v1beta2.ResourceSpec{
-					{Name: "cpu", Weight: 1},
-					{Name: "memory", Weight: 1},
+					{Name: "scalar.io/scalar1", Weight: 1},
 				},
 			},
 		},
 		{
-			name: "NodeResourcesMostAllocatedArgs resources with value",
-			in: &v1beta2.NodeResourcesMostAllocatedArgs{
+			name: "NodeResourcesBalancedAllocationArgs with mixed resources",
+			in: &v1beta2.NodeResourcesBalancedAllocationArgs{
 				Resources: []v1beta2.ResourceSpec{
-					{Name: "resource", Weight: 2},
+					{Name: string(v1.ResourceCPU), Weight: 1},
+					{Name: "scalar.io/scalar1", Weight: 1},
 				},
 			},
-			want: &v1beta2.NodeResourcesMostAllocatedArgs{
+			want: &v1beta2.NodeResourcesBalancedAllocationArgs{
 				Resources: []v1beta2.ResourceSpec{
-					{Name: "resource", Weight: 2},
-				},
-			},
-		},
-		{
-			name: "NodeResourcesMostAllocatedArgs resources empty",
-			in:   &v1beta2.NodeResourcesMostAllocatedArgs{},
-			want: &v1beta2.NodeResourcesMostAllocatedArgs{
-				Resources: []v1beta2.ResourceSpec{
-					{Name: "cpu", Weight: 1},
-					{Name: "memory", Weight: 1},
+					{Name: string(v1.ResourceCPU), Weight: 1},
+					{Name: "scalar.io/scalar1", Weight: 1},
 				},
 			},
 		},
 		{
-			name: "NodeResourcesMostAllocatedArgs resources with value",
-			in: &v1beta2.NodeResourcesMostAllocatedArgs{
+			name: "NodeResourcesBalancedAllocationArgs have resource no weight",
+			in: &v1beta2.NodeResourcesBalancedAllocationArgs{
 				Resources: []v1beta2.ResourceSpec{
-					{Name: "resource", Weight: 2},
+					{Name: string(v1.ResourceCPU)},
+					{Name: "scalar.io/scalar0"},
+					{Name: "scalar.io/scalar1", Weight: 1},
 				},
 			},
-			want: &v1beta2.NodeResourcesMostAllocatedArgs{
+			want: &v1beta2.NodeResourcesBalancedAllocationArgs{
 				Resources: []v1beta2.ResourceSpec{
-					{Name: "resource", Weight: 2},
+					{Name: string(v1.ResourceCPU), Weight: 1},
+					{Name: "scalar.io/scalar0", Weight: 1},
+					{Name: "scalar.io/scalar1", Weight: 1},
 				},
 			},
 		},
@@ -497,6 +723,54 @@ func TestPluginArgsDefaults(t *testing.T) {
 			in: &v1beta2.PodTopologySpreadArgs{},
 			want: &v1beta2.PodTopologySpreadArgs{
 				DefaultingType: v1beta2.ListDefaulting,
+			},
+		},
+		{
+			name: "NodeResourcesFitArgs not set",
+			in:   &v1beta2.NodeResourcesFitArgs{},
+			want: &v1beta2.NodeResourcesFitArgs{
+				ScoringStrategy: &v1beta2.ScoringStrategy{
+					Type:      v1beta2.LeastAllocated,
+					Resources: defaultResourceSpec,
+				},
+			},
+		},
+		{
+			name: "NodeResourcesFitArgs Resources empty",
+			in: &v1beta2.NodeResourcesFitArgs{
+				ScoringStrategy: &v1beta2.ScoringStrategy{
+					Type: v1beta2.MostAllocated,
+				},
+			},
+			want: &v1beta2.NodeResourcesFitArgs{
+				ScoringStrategy: &v1beta2.ScoringStrategy{
+					Type:      v1beta2.MostAllocated,
+					Resources: defaultResourceSpec,
+				},
+			},
+		},
+		{
+			name: "VolumeBindingArgs empty, VolumeCapacityPriority disabled",
+			features: map[featuregate.Feature]bool{
+				features.VolumeCapacityPriority: false,
+			},
+			in: &v1beta2.VolumeBindingArgs{},
+			want: &v1beta2.VolumeBindingArgs{
+				BindTimeoutSeconds: pointer.Int64Ptr(600),
+			},
+		},
+		{
+			name: "VolumeBindingArgs empty, VolumeCapacityPriority enabled",
+			features: map[featuregate.Feature]bool{
+				features.VolumeCapacityPriority: true,
+			},
+			in: &v1beta2.VolumeBindingArgs{},
+			want: &v1beta2.VolumeBindingArgs{
+				BindTimeoutSeconds: pointer.Int64Ptr(600),
+				Shape: []v1beta2.UtilizationShapePoint{
+					{Utilization: 0, Score: 0},
+					{Utilization: 100, Score: 10},
+				},
 			},
 		},
 	}

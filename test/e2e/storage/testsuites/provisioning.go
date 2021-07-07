@@ -60,6 +60,7 @@ type StorageClassTest struct {
 	PvCheck              func(claim *v1.PersistentVolumeClaim)
 	VolumeMode           v1.PersistentVolumeMode
 	AllowVolumeExpansion bool
+	NodeSelection        e2epod.NodeSelection
 }
 
 type provisioningTestSuite struct {
@@ -134,7 +135,7 @@ func (p *provisioningTestSuite) DefineTests(driver storageframework.TestDriver, 
 		dDriver, _ = driver.(storageframework.DynamicPVTestDriver)
 		// Now do the more expensive test initialization.
 		l.config, l.driverCleanup = driver.PrepareTest(f)
-		l.migrationCheck = newMigrationOpCheck(f.ClientSet, dInfo.InTreePluginName)
+		l.migrationCheck = newMigrationOpCheck(f.ClientSet, f.ClientConfig(), dInfo.InTreePluginName)
 		l.cs = l.config.Framework.ClientSet
 		testVolumeSizeRange := p.GetTestSuiteInfo().SupportedSizeRange
 		driverVolumeSizeRange := dDriver.GetDriverInfo().SupportedSizeRange
@@ -242,12 +243,20 @@ func (p *provisioningTestSuite) DefineTests(driver storageframework.TestDriver, 
 		init()
 		defer cleanup()
 
+		if l.config.ClientNodeSelection.Name == "" {
+			// Schedule all pods to the same topology segment (e.g. a cloud availability zone), some
+			// drivers don't support cloning across them.
+			if err := ensureTopologyRequirements(&l.config.ClientNodeSelection, l.cs, dInfo, 1); err != nil {
+				framework.Failf("Error setting topology requirements: %v", err)
+			}
+		}
 		testConfig := storageframework.ConvertTestConfig(l.config)
 		expectedContent := fmt.Sprintf("Hello from namespace %s", f.Namespace.Name)
 		dataSource, dataSourceCleanup := preparePVCDataSourceForProvisioning(f, testConfig, l.cs, l.sourcePVC, l.sc, pattern.VolMode, expectedContent)
 		defer dataSourceCleanup()
 
 		l.pvc.Spec.DataSource = dataSource
+		l.testCase.NodeSelection = testConfig.ClientNodeSelection
 		l.testCase.PvCheck = func(claim *v1.PersistentVolumeClaim) {
 			ginkgo.By("checking whether the created volume has the pre-populated data")
 			tests := []e2evolume.Test{
@@ -275,6 +284,13 @@ func (p *provisioningTestSuite) DefineTests(driver storageframework.TestDriver, 
 		init()
 		defer cleanup()
 
+		if l.config.ClientNodeSelection.Name == "" {
+			// Schedule all pods to the same topology segment (e.g. a cloud availability zone), some
+			// drivers don't support cloning across them.
+			if err := ensureTopologyRequirements(&l.config.ClientNodeSelection, l.cs, dInfo, 1); err != nil {
+				framework.Failf("Error setting topology requirements: %v", err)
+			}
+		}
 		testConfig := storageframework.ConvertTestConfig(l.config)
 		expectedContent := fmt.Sprintf("Hello from namespace %s", f.Namespace.Name)
 		dataSource, dataSourceCleanup := preparePVCDataSourceForProvisioning(f, testConfig, l.cs, l.sourcePVC, l.sc, pattern.VolMode, expectedContent)
@@ -293,6 +309,7 @@ func (p *provisioningTestSuite) DefineTests(driver storageframework.TestDriver, 
 				myTestConfig.Prefix = fmt.Sprintf("%s-%d", myTestConfig.Prefix, i)
 
 				t := *l.testCase
+				t.NodeSelection = testConfig.ClientNodeSelection
 				t.PvCheck = func(claim *v1.PersistentVolumeClaim) {
 					ginkgo.By(fmt.Sprintf("checking whether the created volume %d has the pre-populated data", i))
 					tests := []e2evolume.Test{
@@ -390,8 +407,9 @@ func (t StorageClassTest) TestDynamicProvisioning() *v1.PersistentVolume {
 	if *class.VolumeBindingMode == storagev1.VolumeBindingWaitForFirstConsumer {
 		ginkgo.By(fmt.Sprintf("creating a pod referring to the class=%+v claim=%+v", class, claim))
 		var podConfig *e2epod.Config = &e2epod.Config{
-			NS:   claim.Namespace,
-			PVCs: []*v1.PersistentVolumeClaim{claim},
+			NS:            claim.Namespace,
+			PVCs:          []*v1.PersistentVolumeClaim{claim},
+			NodeSelection: t.NodeSelection,
 		}
 
 		var pod *v1.Pod
@@ -533,7 +551,8 @@ func PVWriteReadSingleNodeCheck(client clientset.Interface, timeouts *framework.
 	command += " || (mount | grep 'on /mnt/test'; false)"
 
 	if framework.NodeOSDistroIs("windows") {
-		command = "select-string 'hello world' /mnt/test/data"
+		// agnhost doesn't support mount
+		command = "grep 'hello world' /mnt/test/data"
 	}
 	RunInPodWithVolume(client, timeouts, claim.Namespace, claim.Name, "pvc-volume-tester-reader", command, e2epod.NodeSelection{Name: actualNodeName})
 
@@ -578,9 +597,6 @@ func PVMultiNodeCheck(client clientset.Interface, timeouts *framework.TimeoutCon
 	e2epod.SetAntiAffinity(&secondNode, actualNodeName)
 	ginkgo.By(fmt.Sprintf("checking the created volume is readable and retains data on another node %+v", secondNode))
 	command = "grep 'hello world' /mnt/test/data"
-	if framework.NodeOSDistroIs("windows") {
-		command = "select-string 'hello world' /mnt/test/data"
-	}
 	pod = StartInPodWithVolume(client, claim.Namespace, claim.Name, "pvc-reader-node2", command, secondNode)
 	framework.ExpectNoError(e2epod.WaitForPodSuccessInNamespaceTimeout(client, pod.Name, pod.Namespace, timeouts.PodStartSlow))
 	runningPod, err = client.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})

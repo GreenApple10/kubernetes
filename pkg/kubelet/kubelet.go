@@ -367,7 +367,9 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	keepTerminatedPodVolumes bool,
 	nodeLabels map[string]string,
 	seccompProfileRoot string,
-	nodeStatusMaxImages int32) (*Kubelet, error) {
+	nodeStatusMaxImages int32,
+	seccompDefault bool,
+) (*Kubelet, error) {
 	if rootDirectory == "" {
 		return nil, fmt.Errorf("invalid root directory %q", rootDirectory)
 	}
@@ -649,6 +651,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		kubeDeps.dockerLegacyService,
 		klet.containerLogManager,
 		klet.runtimeClassManager,
+		seccompDefault,
 	)
 	if err != nil {
 		return nil, err
@@ -2277,7 +2280,7 @@ func (kl *Kubelet) ListenAndServePodResources() {
 		klog.V(2).InfoS("Failed to get local endpoint for PodResources endpoint", "err", err)
 		return
 	}
-	server.ListenAndServePodResources(socket, kl.podManager, kl.containerManager, kl.containerManager)
+	server.ListenAndServePodResources(socket, kl.podManager, kl.containerManager, kl.containerManager, kl.containerManager)
 }
 
 // Delete the eligible dead container instances in a pod. Depending on the configuration, the latest dead containers may be kept around.

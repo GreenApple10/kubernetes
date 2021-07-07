@@ -30,6 +30,7 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -54,6 +55,7 @@ import (
 	apiopenapi "k8s.io/apiserver/pkg/endpoints/openapi"
 	apirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/features"
+	genericfeatures "k8s.io/apiserver/pkg/features"
 	genericregistry "k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/server/dynamiccertificates"
 	"k8s.io/apiserver/pkg/server/egressselector"
@@ -63,6 +65,7 @@ import (
 	serverstore "k8s.io/apiserver/pkg/server/storage"
 	"k8s.io/apiserver/pkg/storageversion"
 	"k8s.io/apiserver/pkg/util/feature"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	utilflowcontrol "k8s.io/apiserver/pkg/util/flowcontrol"
 	flowcontrolrequest "k8s.io/apiserver/pkg/util/flowcontrol/request"
 	"k8s.io/client-go/informers"
@@ -137,6 +140,9 @@ type Config struct {
 	// ExternalAddress is the host name to use for external (public internet) facing URLs (e.g. Swagger)
 	// Will default to a value based on secure serving info and available ipv4 IPs.
 	ExternalAddress string
+
+	// TracerProvider can provide a tracer, which records spans for distributed tracing.
+	TracerProvider *trace.TracerProvider
 
 	//===========================================================================
 	// Fields you probably don't care about changing
@@ -218,6 +224,15 @@ type Config struct {
 
 	// RequestWidthEstimator is used to estimate the "width" of the incoming request(s).
 	RequestWidthEstimator flowcontrolrequest.WidthEstimatorFunc
+
+	// lifecycleSignals provides access to the various signals
+	// that happen during lifecycle of the apiserver.
+	// it's intentionally marked private as it should never be overridden.
+	lifecycleSignals lifecycleSignals
+
+	// StorageObjectCountTracker is used to keep track of the total number of objects
+	// in the storage per resource, so we can estimate width of incoming requests.
+	StorageObjectCountTracker flowcontrolrequest.StorageObjectCountTracker
 
 	//===========================================================================
 	// values below here are targets for removal
@@ -341,8 +356,10 @@ func NewConfig(codecs serializer.CodecFactory) *Config {
 
 		// Default to treating watch as a long-running operation
 		// Generic API servers have no inherent long-running subresources
-		LongRunningFunc:       genericfilters.BasicLongRunningRequestCheck(sets.NewString("watch"), sets.NewString()),
-		RequestWidthEstimator: flowcontrolrequest.DefaultWidthEstimator,
+		LongRunningFunc:           genericfilters.BasicLongRunningRequestCheck(sets.NewString("watch"), sets.NewString()),
+		RequestWidthEstimator:     flowcontrolrequest.DefaultWidthEstimator,
+		lifecycleSignals:          newLifecycleSignals(),
+		StorageObjectCountTracker: flowcontrolrequest.NewStorageObjectCountTracker(),
 
 		APIServerID:           id,
 		StorageVersionManager: storageversion.NewDefaultManager(),
@@ -589,13 +606,14 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
 		healthzChecks:    c.HealthzChecks,
 		livezChecks:      c.LivezChecks,
 		readyzChecks:     c.ReadyzChecks,
-		readinessStopCh:  make(chan struct{}),
 		livezGracePeriod: c.LivezGracePeriod,
 
 		DiscoveryGroupManager: discovery.NewRootAPIsHandler(c.DiscoveryAddresses, c.Serializer),
 
 		maxRequestBodyBytes: c.MaxRequestBodyBytes,
 		livezClock:          clock.RealClock{},
+
+		lifecycleSignals: c.lifecycleSignals,
 
 		APIServerID:           c.APIServerID,
 		StorageVersionManager: c.StorageVersionManager,
@@ -765,7 +783,6 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	handler = genericapifilters.WithRequestDeadline(handler, c.AuditBackend, c.AuditPolicyChecker,
 		c.LongRunningFunc, c.Serializer, c.RequestTimeout)
 	handler = genericfilters.WithWaitGroup(handler, c.LongRunningFunc, c.HandlerChainWaitGroup)
-	handler = genericapifilters.WithRequestInfo(handler, c.RequestInfoResolver)
 	if c.SecureServing != nil && !c.SecureServing.DisableHTTP2 && c.GoawayChance > 0 {
 		handler = genericfilters.WithProbabilisticGoaway(handler, c.GoawayChance)
 	}
@@ -774,6 +791,10 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	handler = genericapifilters.WithCacheControl(handler)
 	handler = genericfilters.WithHSTS(handler, c.HSTSDirectives)
 	handler = genericfilters.WithHTTPLogging(handler)
+	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.APIServerTracing) {
+		handler = genericapifilters.WithTracing(handler, c.TracerProvider)
+	}
+	handler = genericapifilters.WithRequestInfo(handler, c.RequestInfoResolver)
 	handler = genericapifilters.WithRequestReceivedTimestamp(handler)
 	handler = genericfilters.WithPanicRecovery(handler, c.RequestInfoResolver)
 	handler = genericapifilters.WithAuditID(handler)
