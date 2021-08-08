@@ -22,10 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	utilnode "k8s.io/kubernetes/pkg/util/node"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
@@ -83,6 +86,7 @@ import (
 	utilipvs "k8s.io/kubernetes/pkg/util/ipvs"
 	"k8s.io/kubernetes/pkg/util/oom"
 	"k8s.io/utils/exec"
+	utilsnet "k8s.io/utils/net"
 	utilpointer "k8s.io/utils/pointer"
 )
 
@@ -90,7 +94,7 @@ const (
 	proxyModeUserspace   = "userspace"
 	proxyModeIPTables    = "iptables"
 	proxyModeIPVS        = "ipvs"
-	proxyModeKernelspace = "kernelspace"
+	proxyModeKernelspace = "kernelspace" //nolint:deadcode,varcheck
 )
 
 // proxyRun defines the interface to run a specified ProxyServer
@@ -217,7 +221,7 @@ func NewOptions() *Options {
 // Complete completes all the required options.
 func (o *Options) Complete() error {
 	if len(o.ConfigFile) == 0 && len(o.WriteConfigTo) == 0 {
-		klog.Warning("WARNING: all flags other than --config, --write-config-to, and --cleanup are deprecated. Please begin using a config file ASAP.")
+		klog.InfoS("WARNING: all flags other than --config, --write-config-to, and --cleanup are deprecated. Please begin using a config file ASAP")
 		o.config.HealthzBindAddress = addressFromDeprecatedFlags(o.config.HealthzBindAddress, o.healthzPort)
 		o.config.MetricsBindAddress = addressFromDeprecatedFlags(o.config.MetricsBindAddress, o.metricsPort)
 	}
@@ -362,7 +366,7 @@ func (o *Options) writeConfigFile() (err error) {
 		return err
 	}
 
-	klog.Infof("Wrote configuration to: %s\n", o.WriteConfigTo)
+	klog.InfoS("Wrote configuration", "WriteConfigTo", o.WriteConfigTo)
 
 	return nil
 }
@@ -428,7 +432,7 @@ func (o *Options) loadConfig(data []byte) (*kubeproxyconfig.KubeProxyConfigurati
 		}
 
 		// Continue with the v1alpha1 object that was decoded leniently, but emit a warning.
-		klog.Warningf("using lenient decoding as strict decoding failed: %v", err)
+		klog.InfoS("Using lenient decoding as strict decoding failed", "err", err)
 	}
 
 	proxyConfig, ok := configObj.(*kubeproxyconfig.KubeProxyConfiguration)
@@ -475,15 +479,21 @@ with the apiserver API to configure the proxy.`,
 			cliflag.PrintFlags(cmd.Flags())
 
 			if err := initForOS(opts.WindowsService); err != nil {
-				klog.Fatalf("failed OS init: %v", err)
+				klog.ErrorS(err, "Failed OS init")
+				// ACTION REQUIRED: Exit code changed from 255 to 1
+				os.Exit(1)
 			}
 
 			if err := opts.Complete(); err != nil {
-				klog.Fatalf("failed complete: %v", err)
+				klog.ErrorS(err, "Failed complete")
+				// ACTION REQUIRED: Exit code changed from 255 to 1
+				os.Exit(1)
 			}
 
 			if err := opts.Validate(); err != nil {
-				klog.Fatalf("failed validate: %v", err)
+				klog.ErrorS(err, "Failed validate")
+				// ACTION REQUIRED: Exit code changed from 255 to 1
+				os.Exit(1)
 			}
 
 			if err := opts.Run(); err != nil {
@@ -503,7 +513,9 @@ with the apiserver API to configure the proxy.`,
 	var err error
 	opts.config, err = opts.ApplyDefaults(opts.config)
 	if err != nil {
-		klog.Fatalf("unable to create flag defaults: %v", err)
+		klog.ErrorS(err, "Unable to create flag defaults")
+		// ACTION REQUIRED: Exit code changed from 255 to 1
+		os.Exit(1)
 	}
 
 	opts.AddFlags(cmd.Flags())
@@ -546,7 +558,7 @@ func createClients(config componentbaseconfig.ClientConnectionConfiguration, mas
 	var err error
 
 	if len(config.Kubeconfig) == 0 && len(masterOverride) == 0 {
-		klog.Info("Neither kubeconfig file nor master URL was specified. Falling back to in-cluster config.")
+		klog.InfoS("Neither kubeconfig file nor master URL was specified. Falling back to in-cluster config")
 		kubeConfig, err = rest.InClusterConfig()
 	} else {
 		// This creates a client, first loading any specified kubeconfig
@@ -585,7 +597,7 @@ func serveHealthz(hz healthcheck.ProxierHealthUpdater, errCh chan error) {
 	fn := func() {
 		err := hz.Run()
 		if err != nil {
-			klog.Errorf("healthz server failed: %v", err)
+			klog.ErrorS(err, "Healthz server failed")
 			if errCh != nil {
 				errCh <- fmt.Errorf("healthz server failed: %v", err)
 				// if in hardfail mode, never retry again
@@ -593,7 +605,7 @@ func serveHealthz(hz healthcheck.ProxierHealthUpdater, errCh chan error) {
 				<-blockCh
 			}
 		} else {
-			klog.Errorf("healthz server returned without error")
+			klog.ErrorS(nil, "Healthz server returned without error")
 		}
 	}
 	go wait.Until(fn, 5*time.Second, wait.NeverStop)
@@ -642,14 +654,14 @@ func serveMetrics(bindAddress, proxyMode string, enableProfiling bool, errCh cha
 // TODO: At the moment, Run() cannot return a nil error, otherwise it's caller will never exit. Update callers of Run to handle nil errors.
 func (s *ProxyServer) Run() error {
 	// To help debugging, immediately log version
-	klog.Infof("Version: %+v", version.Get())
+	klog.InfoS("Version info", "version", version.Get())
 
 	// TODO(vmarmol): Use container config for this.
 	var oomAdjuster *oom.OOMAdjuster
 	if s.OOMScoreAdj != nil {
 		oomAdjuster = oom.NewOOMAdjuster()
 		if err := oomAdjuster.ApplyOOMScoreAdj(0, int(*s.OOMScoreAdj)); err != nil {
-			klog.V(2).Info(err)
+			klog.V(2).InfoS("Failed to apply OOMScore", "err", err)
 		}
 	}
 
@@ -788,10 +800,10 @@ func getConntrackMax(config kubeproxyconfig.KubeProxyConntrackConfiguration) (in
 		}
 		scaled := int(*config.MaxPerCore) * detectNumCPU()
 		if scaled > floor {
-			klog.V(3).Infof("getConntrackMax: using scaled conntrack-max-per-core")
+			klog.V(3).InfoS("GetConntrackMax: using scaled conntrack-max-per-core")
 			return scaled, nil
 		}
-		klog.V(3).Infof("getConntrackMax: using conntrack-min")
+		klog.V(3).InfoS("GetConntrackMax: using conntrack-min")
 		return floor, nil
 	}
 	return 0, nil
@@ -816,4 +828,37 @@ func (s *ProxyServer) CleanupAndExit() error {
 	}
 
 	return nil
+}
+
+// detectNodeIP returns the nodeIP used by the proxier
+// The order of precedence is:
+// 1. config.bindAddress if bindAddress is not 0.0.0.0 or ::
+// 2. the primary IP from the Node object, if set
+// 3. if no IP is found it defaults to 127.0.0.1 and IPv4
+func detectNodeIP(client clientset.Interface, hostname, bindAddress string) net.IP {
+	nodeIP := net.ParseIP(bindAddress)
+	if nodeIP.IsUnspecified() {
+		nodeIP = utilnode.GetNodeIP(client, hostname)
+	}
+	if nodeIP == nil {
+		klog.V(0).Infof("can't determine this node's IP, assuming 127.0.0.1; if this is incorrect, please set the --bind-address flag")
+		nodeIP = net.ParseIP("127.0.0.1")
+	}
+	return nodeIP
+}
+
+// nodeIPTuple takes an addresses and return a tuple (ipv4,ipv6)
+// The returned tuple is guaranteed to have the order (ipv4,ipv6). The address NOT of the passed address
+// will have "any" address (0.0.0.0 or ::) inserted.
+func nodeIPTuple(bindAddress string) [2]net.IP {
+	nodes := [2]net.IP{net.IPv4zero, net.IPv6zero}
+
+	adr := net.ParseIP(bindAddress)
+	if utilsnet.IsIPv6(adr) {
+		nodes[1] = adr
+	} else {
+		nodes[0] = adr
+	}
+
+	return nodes
 }

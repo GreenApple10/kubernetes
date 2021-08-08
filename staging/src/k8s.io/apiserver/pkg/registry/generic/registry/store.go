@@ -44,6 +44,7 @@ import (
 	storeerr "k8s.io/apiserver/pkg/storage/errors"
 	"k8s.io/apiserver/pkg/storage/etcd3/metrics"
 	"k8s.io/apiserver/pkg/util/dryrun"
+	flowcontrolrequest "k8s.io/apiserver/pkg/util/flowcontrol/request"
 	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/structured-merge-diff/v4/fieldpath"
 
@@ -982,6 +983,7 @@ func (e *Store) updateForGracefulDeletionAndFinalizers(ctx context.Context, name
 }
 
 // Delete removes the item from storage.
+// options can be mutated by rest.BeforeDelete due to a graceful deletion strategy.
 func (e *Store) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
 	key, err := e.KeyFunc(ctx, name)
 	if err != nil {
@@ -1148,7 +1150,11 @@ func (e *Store) DeleteCollection(ctx context.Context, deleteValidation rest.Vali
 					errs <- err
 					return
 				}
-				if _, _, err := e.Delete(ctx, accessor.GetName(), deleteValidation, options); err != nil && !apierrors.IsNotFound(err) {
+				// DeepCopy the deletion options because individual graceful deleters communicate changes via a mutating
+				// function in the delete strategy called in the delete method.  While that is always ugly, it works
+				// when making a single call.  When making multiple calls via delete collection, the mutation applied to
+				// pod/A can change the option ultimately used for pod/B.
+				if _, _, err := e.Delete(ctx, accessor.GetName(), deleteValidation, options.DeepCopy()); err != nil && !apierrors.IsNotFound(err) {
 					klog.V(4).InfoS("Delete object in DeleteCollection failed", "object", klog.KObj(accessor), "err", err)
 					errs <- err
 					return
@@ -1408,7 +1414,7 @@ func (e *Store) CompleteWithOptions(options *generic.StoreOptions) error {
 		e.StorageVersioner = opts.StorageConfig.EncodeVersioner
 
 		if opts.CountMetricPollPeriod > 0 {
-			stopFunc := e.startObservingCount(opts.CountMetricPollPeriod)
+			stopFunc := e.startObservingCount(opts.CountMetricPollPeriod, opts.StorageObjectCountTracker)
 			previousDestroy := e.DestroyFunc
 			e.DestroyFunc = func() {
 				stopFunc()
@@ -1423,7 +1429,7 @@ func (e *Store) CompleteWithOptions(options *generic.StoreOptions) error {
 }
 
 // startObservingCount starts monitoring given prefix and periodically updating metrics. It returns a function to stop collection.
-func (e *Store) startObservingCount(period time.Duration) func() {
+func (e *Store) startObservingCount(period time.Duration, objectCountTracker flowcontrolrequest.StorageObjectCountTracker) func() {
 	prefix := e.KeyRootFunc(genericapirequest.NewContext())
 	resourceName := e.DefaultQualifiedResource.String()
 	klog.V(2).InfoS("Monitoring resource count at path", "resource", resourceName, "path", "<storage-prefix>/"+prefix)
@@ -1432,9 +1438,12 @@ func (e *Store) startObservingCount(period time.Duration) func() {
 		count, err := e.Storage.Count(prefix)
 		if err != nil {
 			klog.V(5).InfoS("Failed to update storage count metric", "err", err)
-			metrics.UpdateObjectCount(resourceName, -1)
-		} else {
-			metrics.UpdateObjectCount(resourceName, count)
+			count = -1
+		}
+
+		metrics.UpdateObjectCount(resourceName, count)
+		if objectCountTracker != nil {
+			objectCountTracker.Set(resourceName, count)
 		}
 	}, period, resourceCountPollPeriodJitter, true, stopCh)
 	return func() { close(stopCh) }

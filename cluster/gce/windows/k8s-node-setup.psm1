@@ -229,6 +229,13 @@ function Fetch-KubeEnv {
   # The type of kube_env is a powershell String.
   $kube_env = Get-InstanceMetadataAttribute 'kube-env'
   $kube_env_table = ConvertFrom_Yaml_KubeEnv ${kube_env}
+
+  Log-Output "Logging kube-env key-value pairs except CERT and KEY values"
+  foreach ($entry in $kube_env_table.GetEnumerator()) {
+    if ((-not ($entry.Name.contains("CERT"))) -and (-not ($entry.Name.contains("KEY")))) {
+      Log-Output "$($entry.Name): $($entry.Value)"
+    }
+  }
   return ${kube_env_table}
 }
 
@@ -1438,6 +1445,25 @@ function Configure_Dockerd {
  Restart-Service Docker
 }
 
+# Configures the TCP/IP parameters to be in sync with the GCP recommendation.
+# Not setting these values correctly can cause network issues for connections
+# that live longer than 10 minutes.
+# See: https://cloud.google.com/compute/docs/troubleshooting/general-tips#idle-connections
+function Set-WindowsTCPParameters {
+  Set-ItemProperty -Force -Confirm:$false -Path `
+    'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' `
+    -Name 'KeepAliveInterval' -Type Dword -Value 1000
+  Set-ItemProperty -Force -Confirm:$false `
+    -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' `
+    -Name 'KeepAliveTime' -Type Dword -Value 60000
+  Set-ItemProperty -Force -Confirm:$false `
+    -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' `
+    -Name 'TcpMaxDataRetransmissions' -Type Dword -Value 10
+
+  Log-Output 'TCP/IP Parameters'
+  Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+}
+
 # Writes a CNI config file under $env:CNI_CONFIG_DIR for containerd.
 #
 # Prerequisites:
@@ -1566,7 +1592,7 @@ function Install_Containerd {
   New-Item $tmp_dir -ItemType 'directory' -Force | Out-Null
 
   # TODO(ibrahimab) Change this to a gcs bucket with CI maintained and accessible by community.
-  $version = '1.4.4'
+  $version = '1.5.4'
   $tar_url = ("https://github.com/containerd/containerd/releases/download/v${version}/" +
               "cri-containerd-cni-${version}-windows-amd64.tar.gz")
   $sha_url = $tar_url + ".sha256sum"

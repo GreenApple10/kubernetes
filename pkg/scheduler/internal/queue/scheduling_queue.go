@@ -48,8 +48,8 @@ import (
 )
 
 const (
-	// If the pod stays in unschedulableQ longer than the unschedulableQTimeInterval,
-	// the pod will be moved from unschedulableQ to activeQ.
+	// If a pod stays in unschedulableQ longer than unschedulableQTimeInterval,
+	// the pod will be moved from unschedulableQ to backoffQ or activeQ.
 	unschedulableQTimeInterval = 60 * time.Second
 
 	queueClosed = "scheduling queue is closed"
@@ -77,6 +77,10 @@ type PreEnqueueCheck func(pod *v1.Pod) bool
 type SchedulingQueue interface {
 	framework.PodNominator
 	Add(pod *v1.Pod) error
+	// Activate moves the given pods to activeQ iff they're in unschedulableQ or backoffQ.
+	// The passed-in pods are originally compiled from plugins that want to activate Pods,
+	// by injecting the pods through a reserved CycleState struct (PodsToActivate).
+	Activate(pods map[string]*v1.Pod)
 	// AddUnschedulableIfNotPresent adds an unschedulable pod back to scheduling queue.
 	// The podSchedulingCycle represents the current scheduling cycle number which can be
 	// returned by calling SchedulingCycle().
@@ -283,7 +287,7 @@ func (p *PriorityQueue) Add(pod *v1.Pod) error {
 	defer p.lock.Unlock()
 	pInfo := p.newQueuedPodInfo(pod)
 	if err := p.activeQ.Add(pInfo); err != nil {
-		klog.ErrorS(err, "Error adding pod to the scheduling queue", "pod", klog.KObj(pod))
+		klog.ErrorS(err, "Error adding pod to the active queue", "pod", klog.KObj(pod))
 		return err
 	}
 	if p.unschedulableQ.get(pod) != nil {
@@ -299,6 +303,58 @@ func (p *PriorityQueue) Add(pod *v1.Pod) error {
 	p.cond.Broadcast()
 
 	return nil
+}
+
+// Activate moves the given pods to activeQ iff they're in unschedulableQ or backoffQ.
+func (p *PriorityQueue) Activate(pods map[string]*v1.Pod) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	activated := false
+	for _, pod := range pods {
+		if p.activate(pod) {
+			activated = true
+		}
+	}
+
+	if activated {
+		p.cond.Broadcast()
+	}
+}
+
+func (p *PriorityQueue) activate(pod *v1.Pod) bool {
+	// Verify if the pod is present in activeQ.
+	if _, exists, _ := p.activeQ.Get(newQueuedPodInfoForLookup(pod)); exists {
+		// No need to activate if it's already present in activeQ.
+		return false
+	}
+	var pInfo *framework.QueuedPodInfo
+	// Verify if the pod is present in unschedulableQ or backoffQ.
+	if pInfo = p.unschedulableQ.get(pod); pInfo == nil {
+		// If the pod doesn't belong to unschedulableQ or backoffQ, don't activate it.
+		if obj, exists, _ := p.podBackoffQ.Get(newQueuedPodInfoForLookup(pod)); !exists {
+			klog.ErrorS(nil, "To-activate pod does not exist in unschedulableQ or backoffQ", "pod", klog.KObj(pod))
+			return false
+		} else {
+			pInfo = obj.(*framework.QueuedPodInfo)
+		}
+	}
+
+	if pInfo == nil {
+		// Redundant safe check. We shouldn't reach here.
+		klog.ErrorS(nil, "Internal error: cannot obtain pInfo")
+		return false
+	}
+
+	if err := p.activeQ.Add(pInfo); err != nil {
+		klog.ErrorS(err, "Error adding pod to the scheduling queue", "pod", klog.KObj(pod))
+		return false
+	}
+	p.unschedulableQ.delete(pod)
+	p.podBackoffQ.Delete(pInfo)
+	metrics.SchedulerQueueIncomingPods.WithLabelValues("active", ForceActivate).Inc()
+	p.PodNominator.AddNominatedPod(pInfo.PodInfo, "")
+	return true
 }
 
 // isPodBackingoff returns true if a pod is still waiting for its backoff timer.
@@ -378,8 +434,8 @@ func (p *PriorityQueue) flushBackoffQCompleted() {
 	}
 }
 
-// flushUnschedulableQLeftover moves pod which stays in unschedulableQ longer than the unschedulableQTimeInterval
-// to activeQ.
+// flushUnschedulableQLeftover moves pods which stay in unschedulableQ longer than unschedulableQTimeInterval
+// to backoffQ or activeQ.
 func (p *PriorityQueue) flushUnschedulableQLeftover() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -529,7 +585,7 @@ func (p *PriorityQueue) AssignedPodUpdated(pod *v1.Pod) {
 
 // MoveAllToActiveOrBackoffQueue moves all pods from unschedulableQ to activeQ or backoffQ.
 // This function adds all pods and then signals the condition variable to ensure that
-// if Pop() is waiting for an item, it receives it after all the pods are in the
+// if Pop() is waiting for an item, it receives the signal after all the pods are in the
 // queue and the head is the highest priority pod.
 func (p *PriorityQueue) MoveAllToActiveOrBackoffQueue(event framework.ClusterEvent, preCheck PreEnqueueCheck) {
 	p.lock.Lock()
@@ -644,14 +700,17 @@ func (npm *nominator) AddNominatedPod(pi *framework.PodInfo, nodeName string) {
 	npm.Unlock()
 }
 
-// NominatedPodsForNode returns pods that are nominated to run on the given node,
+// NominatedPodsForNode returns a copy of pods that are nominated to run on the given node,
 // but they are waiting for other pods to be removed from the node.
 func (npm *nominator) NominatedPodsForNode(nodeName string) []*framework.PodInfo {
 	npm.RLock()
 	defer npm.RUnlock()
-	// TODO: we may need to return a copy of []*Pods to avoid modification
-	// on the caller side.
-	return npm.nominatedPods[nodeName]
+	// Make a copy of the nominated Pods so the caller can mutate safely.
+	pods := make([]*framework.PodInfo, len(npm.nominatedPods[nodeName]))
+	for i := 0; i < len(pods); i++ {
+		pods[i] = npm.nominatedPods[nodeName][i].DeepCopy()
+	}
+	return pods
 }
 
 func (p *PriorityQueue) podsCompareBackoffCompleted(podInfo1, podInfo2 interface{}) bool {

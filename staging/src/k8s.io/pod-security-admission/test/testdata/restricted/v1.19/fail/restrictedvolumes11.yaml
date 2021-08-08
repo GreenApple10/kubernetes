@@ -15,8 +15,10 @@ spec:
       allowPrivilegeEscalation: false
   securityContext:
     runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   volumes:
   - fc:
       wwids:
-      - testing
-    name: volume-fc
+      - test
+    name: volume1

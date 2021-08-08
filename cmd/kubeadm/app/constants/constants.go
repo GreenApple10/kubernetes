@@ -286,7 +286,7 @@ const (
 	MinExternalEtcdVersion = "3.2.18"
 
 	// DefaultEtcdVersion indicates the default etcd version that kubeadm uses
-	DefaultEtcdVersion = "3.5.0-rc.0-0"
+	DefaultEtcdVersion = "3.5.0-0"
 
 	// Etcd defines variable used internally when referring to etcd component
 	Etcd = "etcd"
@@ -312,7 +312,7 @@ const (
 	// NodeBootstrapTokenAuthGroup specifies which group a Node Bootstrap Token should be authenticated in
 	NodeBootstrapTokenAuthGroup = "system:bootstrappers:kubeadm:default-node-token"
 
-	// DefaultCIImageRepository points to image registry where CI uploads images from ci-cross build job
+	// DefaultCIImageRepository points to image registry where CI uploads images from ci build job
 	DefaultCIImageRepository = "gcr.io/k8s-staging-ci-images"
 
 	// CoreDNSConfigMap specifies in what ConfigMap in the kube-system namespace the CoreDNS config should be stored
@@ -467,8 +467,8 @@ var (
 		19: "3.4.13-0",
 		20: "3.4.13-0",
 		21: "3.4.13-0",
-		22: "3.5.0-rc.0-0",
-		23: "3.5.0-rc.0-0",
+		22: "3.5.0-0",
+		23: "3.5.0-0",
 	}
 
 	// KubeadmCertsClusterRoleName sets the name for the ClusterRole that allows

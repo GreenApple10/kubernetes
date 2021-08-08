@@ -15,7 +15,9 @@ spec:
       allowPrivilegeEscalation: false
   securityContext:
     runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   volumes:
   - hostPath:
       path: /dev/null
-    name: volume-hostpath
+    name: volume1

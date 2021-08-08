@@ -15,7 +15,9 @@ spec:
       allowPrivilegeEscalation: false
   securityContext:
     runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   volumes:
   - flexVolume:
-      driver: testing
-    name: volume-flexvolume
+      driver: test
+    name: volume1

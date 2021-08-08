@@ -18,7 +18,6 @@ require (
 	github.com/JeffAshton/win_pdh v0.0.0-20161109143554-76bb4ee9f0ab
 	github.com/Microsoft/go-winio v0.4.15
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
-	github.com/PuerkitoBio/purell v1.1.1
 	github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e
 	github.com/auth0/go-jwt-middleware v1.0.1 // indirect
 	github.com/aws/aws-sdk-go v1.38.49
@@ -51,7 +50,6 @@ require (
 	github.com/google/gofuzz v1.1.0
 	github.com/google/uuid v1.1.2
 	github.com/googleapis/gnostic v0.5.5
-	github.com/hashicorp/golang-lru v0.5.1
 	github.com/heketi/heketi v10.3.0+incompatible
 	github.com/heketi/tests v0.0.0-20151005000721-f3775cbcefd6 // indirect
 	github.com/ishidawataru/sctp v0.0.0-20190723014705-7c296d48a2b5
@@ -67,8 +65,8 @@ require (
 	github.com/onsi/ginkgo v1.14.0
 	github.com/onsi/gomega v1.10.1
 	github.com/opencontainers/go-digest v1.0.0
-	github.com/opencontainers/runc v1.0.0-rc95
-	github.com/opencontainers/selinux v1.8.0
+	github.com/opencontainers/runc v1.0.1
+	github.com/opencontainers/selinux v1.8.2
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/prometheus/client_golang v1.11.0
@@ -82,8 +80,12 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/vishvananda/netlink v1.1.0
 	github.com/vmware/govmomi v0.20.3
+	go.etcd.io/etcd/api/v3 v3.5.0
 	go.etcd.io/etcd/client/pkg/v3 v3.5.0
 	go.etcd.io/etcd/client/v3 v3.5.0
+	go.opentelemetry.io/otel/sdk v0.20.0
+	go.opentelemetry.io/otel/trace v0.20.0
+	go.opentelemetry.io/proto/otlp v0.7.0
 	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83
 	golang.org/x/exp v0.0.0-20210220032938-85be41e4509f // indirect
 	golang.org/x/net v0.0.0-20210520170846-37e1c6afe023
@@ -91,7 +93,7 @@ require (
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
 	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
-	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
+	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	golang.org/x/tools v0.1.2
 	gonum.org/v1/gonum v0.6.2
 	gonum.org/v1/netlib v0.0.0-20190331212654-76723241ea4e // indirect
@@ -131,8 +133,8 @@ require (
 	k8s.io/mount-utils v0.0.0
 	k8s.io/pod-security-admission v0.0.0
 	k8s.io/sample-apiserver v0.0.0
-	k8s.io/system-validators v1.4.0
-	k8s.io/utils v0.0.0-20210521133846-da695404a2bc
+	k8s.io/system-validators v1.5.0
+	k8s.io/utils v0.0.0-20210707171843-4b05e18ac7d9
 	sigs.k8s.io/structured-merge-diff/v4 v4.1.2
 	sigs.k8s.io/yaml v1.2.0
 )
@@ -179,6 +181,7 @@ replace (
 	github.com/benbjohnson/clock => github.com/benbjohnson/clock v1.0.3
 	github.com/beorn7/perks => github.com/beorn7/perks v1.0.1
 	github.com/bgentry/speakeasy => github.com/bgentry/speakeasy v0.1.0
+	github.com/bits-and-blooms/bitset => github.com/bits-and-blooms/bitset v1.2.0
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.3-0.20200106085610-5cbc8cc4026c
 	github.com/blang/semver => github.com/blang/semver v3.5.1+incompatible
 	github.com/boltdb/bolt => github.com/boltdb/bolt v1.3.1
@@ -190,7 +193,7 @@ replace (
 	github.com/chzyer/logex => github.com/chzyer/logex v1.1.10
 	github.com/chzyer/readline => github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/chzyer/test => github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1
-	github.com/cilium/ebpf => github.com/cilium/ebpf v0.5.0
+	github.com/cilium/ebpf => github.com/cilium/ebpf v0.6.2
 	github.com/clusterhq/flocker-go => github.com/clusterhq/flocker-go v0.0.0-20160920122132-2b8b7259d313
 	github.com/cncf/udpa/go => github.com/cncf/udpa/go v0.0.0-20201120205902-5459f2c99403
 	github.com/cockroachdb/datadriven => github.com/cockroachdb/datadriven v0.0.0-20200714090401-bf6692d28da5
@@ -366,9 +369,9 @@ replace (
 	github.com/onsi/gomega => github.com/onsi/gomega v1.10.1
 	github.com/opencontainers/go-digest => github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec => github.com/opencontainers/image-spec v1.0.1
-	github.com/opencontainers/runc => github.com/opencontainers/runc v1.0.0-rc95
+	github.com/opencontainers/runc => github.com/opencontainers/runc v1.0.1
 	github.com/opencontainers/runtime-spec => github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
-	github.com/opencontainers/selinux => github.com/opencontainers/selinux v1.8.0
+	github.com/opencontainers/selinux => github.com/opencontainers/selinux v1.8.2
 	github.com/opentracing/opentracing-go => github.com/opentracing/opentracing-go v1.1.0
 	github.com/pascaldekloe/goe => github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c
 	github.com/pelletier/go-toml => github.com/pelletier/go-toml v1.2.0
@@ -394,7 +397,7 @@ replace (
 	github.com/seccomp/libseccomp-golang => github.com/seccomp/libseccomp-golang v0.9.1
 	github.com/sergi/go-diff => github.com/sergi/go-diff v1.1.0
 	github.com/shurcooL/sanitized_anchor_name => github.com/shurcooL/sanitized_anchor_name v1.0.0
-	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.7.0
+	github.com/sirupsen/logrus => github.com/sirupsen/logrus v1.8.1
 	github.com/smartystreets/assertions => github.com/smartystreets/assertions v1.1.0
 	github.com/smartystreets/goconvey => github.com/smartystreets/goconvey v1.6.4
 	github.com/soheilhy/cmux => github.com/soheilhy/cmux v0.1.5
@@ -416,7 +419,6 @@ replace (
 	github.com/vishvananda/netlink => github.com/vishvananda/netlink v1.1.0
 	github.com/vishvananda/netns => github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
 	github.com/vmware/govmomi => github.com/vmware/govmomi v0.20.3
-	github.com/willf/bitset => github.com/willf/bitset v1.1.11
 	github.com/xiang90/probing => github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2
 	github.com/xlab/treeprint => github.com/xlab/treeprint v0.0.0-20181112141820-a009c3971eca
 	github.com/yuin/goldmark => github.com/yuin/goldmark v1.3.5
@@ -458,7 +460,7 @@ replace (
 	golang.org/x/sys => golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
 	golang.org/x/term => golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
 	golang.org/x/text => golang.org/x/text v0.3.6
-	golang.org/x/time => golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
+	golang.org/x/time => golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	golang.org/x/tools => golang.org/x/tools v0.1.2
 	golang.org/x/xerrors => golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 	gonum.org/v1/gonum => gonum.org/v1/gonum v0.6.2
@@ -514,19 +516,19 @@ replace (
 	k8s.io/sample-apiserver => ./staging/src/k8s.io/sample-apiserver
 	k8s.io/sample-cli-plugin => ./staging/src/k8s.io/sample-cli-plugin
 	k8s.io/sample-controller => ./staging/src/k8s.io/sample-controller
-	k8s.io/system-validators => k8s.io/system-validators v1.4.0
-	k8s.io/utils => k8s.io/utils v0.0.0-20210521133846-da695404a2bc
+	k8s.io/system-validators => k8s.io/system-validators v1.5.0
+	k8s.io/utils => k8s.io/utils v0.0.0-20210707171843-4b05e18ac7d9
 	modernc.org/cc => modernc.org/cc v1.0.0
 	modernc.org/golex => modernc.org/golex v1.0.0
 	modernc.org/mathutil => modernc.org/mathutil v1.0.0
 	modernc.org/strutil => modernc.org/strutil v1.0.0
 	modernc.org/xc => modernc.org/xc v1.0.0
 	rsc.io/pdf => rsc.io/pdf v0.1.1
-	sigs.k8s.io/apiserver-network-proxy/konnectivity-client => sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.21
-	sigs.k8s.io/kustomize/api => sigs.k8s.io/kustomize/api v0.8.10
-	sigs.k8s.io/kustomize/cmd/config => sigs.k8s.io/kustomize/cmd/config v0.9.12
-	sigs.k8s.io/kustomize/kustomize/v4 => sigs.k8s.io/kustomize/kustomize/v4 v4.1.3
-	sigs.k8s.io/kustomize/kyaml => sigs.k8s.io/kustomize/kyaml v0.10.20
+	sigs.k8s.io/apiserver-network-proxy/konnectivity-client => sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.22
+	sigs.k8s.io/kustomize/api => sigs.k8s.io/kustomize/api v0.8.11
+	sigs.k8s.io/kustomize/cmd/config => sigs.k8s.io/kustomize/cmd/config v0.9.13
+	sigs.k8s.io/kustomize/kustomize/v4 => sigs.k8s.io/kustomize/kustomize/v4 v4.2.0
+	sigs.k8s.io/kustomize/kyaml => sigs.k8s.io/kustomize/kyaml v0.11.0
 	sigs.k8s.io/structured-merge-diff/v4 => sigs.k8s.io/structured-merge-diff/v4 v4.1.2
 	sigs.k8s.io/yaml => sigs.k8s.io/yaml v1.2.0
 )

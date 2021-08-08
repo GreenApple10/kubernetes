@@ -15,8 +15,10 @@ spec:
       allowPrivilegeEscalation: false
   securityContext:
     runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   volumes:
   - glusterfs:
-      endpoints: testing
-      path: testing
-    name: volume-glusterfs
+      endpoints: test
+      path: test
+    name: volume1

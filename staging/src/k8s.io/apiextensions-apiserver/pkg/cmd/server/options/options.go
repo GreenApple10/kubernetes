@@ -111,7 +111,7 @@ func (o CustomResourceDefinitionsServerOptions) Config() (*apiserver.Config, err
 		ExtraConfig: apiserver.ExtraConfig{
 			CRDRESTOptionsGetter: NewCRDRESTOptionsGetter(*o.RecommendedOptions.Etcd),
 			ServiceResolver:      &serviceResolver{serverConfig.SharedInformerFactory.Core().V1().Services().Lister()},
-			AuthResolverWrapper:  webhook.NewDefaultAuthenticationInfoResolverWrapper(nil, nil, serverConfig.LoopbackClientConfig),
+			AuthResolverWrapper:  webhook.NewDefaultAuthenticationInfoResolverWrapper(nil, nil, serverConfig.LoopbackClientConfig, nil),
 		},
 	}
 	return config, nil
@@ -120,13 +120,14 @@ func (o CustomResourceDefinitionsServerOptions) Config() (*apiserver.Config, err
 // NewCRDRESTOptionsGetter create a RESTOptionsGetter for CustomResources.
 func NewCRDRESTOptionsGetter(etcdOptions genericoptions.EtcdOptions) genericregistry.RESTOptionsGetter {
 	ret := apiserver.CRDRESTOptionsGetter{
-		StorageConfig:           etcdOptions.StorageConfig,
-		StoragePrefix:           etcdOptions.StorageConfig.Prefix,
-		EnableWatchCache:        etcdOptions.EnableWatchCache,
-		DefaultWatchCacheSize:   etcdOptions.DefaultWatchCacheSize,
-		EnableGarbageCollection: etcdOptions.EnableGarbageCollection,
-		DeleteCollectionWorkers: etcdOptions.DeleteCollectionWorkers,
-		CountMetricPollPeriod:   etcdOptions.StorageConfig.CountMetricPollPeriod,
+		StorageConfig:             etcdOptions.StorageConfig,
+		StoragePrefix:             etcdOptions.StorageConfig.Prefix,
+		EnableWatchCache:          etcdOptions.EnableWatchCache,
+		DefaultWatchCacheSize:     etcdOptions.DefaultWatchCacheSize,
+		EnableGarbageCollection:   etcdOptions.EnableGarbageCollection,
+		DeleteCollectionWorkers:   etcdOptions.DeleteCollectionWorkers,
+		CountMetricPollPeriod:     etcdOptions.StorageConfig.CountMetricPollPeriod,
+		StorageObjectCountTracker: etcdOptions.StorageConfig.StorageObjectCountTracker,
 	}
 	ret.StorageConfig.Codec = unstructured.UnstructuredJSONScheme
 

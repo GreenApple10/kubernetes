@@ -15,8 +15,10 @@ spec:
       allowPrivilegeEscalation: false
   securityContext:
     runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   volumes:
   - azureDisk:
-      diskName: testing
+      diskName: test
       diskURI: https://test.blob.core.windows.net/test/test.vhd
-    name: volume-azuredisk
+    name: volume1

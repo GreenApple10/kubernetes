@@ -2162,7 +2162,11 @@ func TestDescribeIngress(t *testing.T) {
 	}
 	v1beta1 := fake.NewSimpleClientset(&networkingv1beta1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "bar",
+			Name: "bar",
+			Labels: map[string]string{
+				"id1": "app1",
+				"id2": "app2",
+			},
 			Namespace: "foo",
 		},
 		Spec: networkingv1beta1.IngressSpec{
@@ -2237,6 +2241,8 @@ func TestDescribeIngress(t *testing.T) {
 		"IngressRule.HTTP.Paths.Backend.Service v1beta1": {
 			input: v1beta1,
 			output: `Name:             bar
+Labels:           id1=app1
+                  id2=app2
 Namespace:        foo
 Address:          
 Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
@@ -2251,6 +2257,7 @@ Events:        <none>` + "\n",
 		"IngressRule.HTTP.Paths.Backend.Service v1": {
 			input: netv1,
 			output: `Name:             bar
+Labels:           <none>
 Namespace:        foo
 Address:          
 Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
@@ -2287,6 +2294,7 @@ Events:        <none>` + "\n",
 				},
 			}),
 			output: `Name:             bar
+Labels:           <none>
 Namespace:        foo
 Address:          
 Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
@@ -2323,6 +2331,7 @@ Events:        <none>` + "\n",
 				},
 			}),
 			output: `Name:             bar
+Labels:           <none>
 Namespace:        foo
 Address:          
 Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
@@ -2360,6 +2369,7 @@ Events:        <none>` + "\n",
 				},
 			}),
 			output: `Name:             bar
+Labels:           <none>
 Namespace:        foo
 Address:          
 Default backend:  default-backend:80 (<error: endpoints "default-backend" not found>)
@@ -2397,6 +2407,7 @@ Events:        <none>` + "\n",
 				},
 			}),
 			output: `Name:             bar
+Labels:           <none>
 Namespace:        foo
 Address:          
 Default backend:  APIGroup: example.com, Kind: foo, Name: bar
@@ -2434,6 +2445,7 @@ Events:        <none>` + "\n",
 				},
 			}),
 			output: `Name:             bar
+Labels:           <none>
 Namespace:        foo
 Address:          
 Default backend:  APIGroup: example.com, Kind: foo, Name: bar
@@ -2456,6 +2468,7 @@ Events:        <none>` + "\n",
 				},
 			}),
 			output: `Name:             bar
+Labels:           <none>
 Namespace:        foo
 Address:          
 Default backend:  default-backend:80 (<error: endpoints "default-backend" not found>)
@@ -2498,7 +2511,11 @@ func TestDescribeIngressV1(t *testing.T) {
 
 	fakeClient := fake.NewSimpleClientset(&networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "bar",
+			Name: "bar",
+			Labels: map[string]string{
+				"id1": "app1",
+				"id2": "app2",
+			},
 			Namespace: "foo",
 		},
 		Spec: networkingv1.IngressSpec{
@@ -2524,7 +2541,12 @@ func TestDescribeIngressV1(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "bar") || !strings.Contains(out, "foo") || !strings.Contains(out, "foo.bar.com") || !strings.Contains(out, "/foo") {
+	if !strings.Contains(out, "bar") ||
+		!strings.Contains(out, "foo") ||
+		!strings.Contains(out, "foo.bar.com") ||
+		!strings.Contains(out, "/foo") ||
+		!strings.Contains(out, "app1") ||
+		!strings.Contains(out, "app2") {
 		t.Errorf("unexpected out: %s", out)
 	}
 }
@@ -4066,7 +4088,7 @@ func TestDescribeResourceQuota(t *testing.T) {
 				corev1.ResourceName(corev1.ResourceLimitsMemory):   resource.MustParse("0G"),
 				corev1.ResourceName(corev1.ResourceMemory):         resource.MustParse("0G"),
 				corev1.ResourceName(corev1.ResourceRequestsCPU):    resource.MustParse("0"),
-				corev1.ResourceName(corev1.ResourceRequestsMemory): resource.MustParse("0G"),
+				corev1.ResourceName(corev1.ResourceRequestsMemory): resource.MustParse("1000Ki"),
 			},
 		},
 	})
@@ -4076,7 +4098,7 @@ func TestDescribeResourceQuota(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	expectedOut := []string{"bar", "foo", "limits.cpu", "2", "limits.memory", "2G", "requests.cpu", "1", "requests.memory", "1G"}
+	expectedOut := []string{"bar", "foo", "limits.cpu", "2", "limits.memory", "2G", "requests.cpu", "1", "requests.memory", "1024k", "1G"}
 	for _, expected := range expectedOut {
 		if !strings.Contains(out, expected) {
 			t.Errorf("expected to find %q in output: %q", expected, out)

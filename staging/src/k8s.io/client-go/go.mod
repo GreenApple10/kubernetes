@@ -28,12 +28,13 @@ require (
 	golang.org/x/net v0.0.0-20210520170846-37e1c6afe023
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
-	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
+	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	google.golang.org/protobuf v1.26.0
 	k8s.io/api v0.0.0
 	k8s.io/apimachinery v0.0.0
 	k8s.io/klog/v2 v2.9.0
-	k8s.io/utils v0.0.0-20210521133846-da695404a2bc
+	k8s.io/kube-openapi v0.0.0-20210421082810-95288971da7e
+	k8s.io/utils v0.0.0-20210707171843-4b05e18ac7d9
 	sigs.k8s.io/structured-merge-diff/v4 v4.1.2
 	sigs.k8s.io/yaml v1.2.0
 )

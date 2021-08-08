@@ -15,8 +15,10 @@ spec:
       allowPrivilegeEscalation: false
   securityContext:
     runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   volumes:
-  - name: volume-portworxvolume
+  - name: volume1
     portworxVolume:
       fsType: ext4
-      volumeID: testing
+      volumeID: test

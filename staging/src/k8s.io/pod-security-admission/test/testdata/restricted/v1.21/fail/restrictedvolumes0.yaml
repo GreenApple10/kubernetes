@@ -15,7 +15,9 @@ spec:
       allowPrivilegeEscalation: false
   securityContext:
     runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   volumes:
   - gcePersistentDisk:
-      pdName: testing
-    name: volume-gcepersistentdisk
+      pdName: test
+    name: volume1

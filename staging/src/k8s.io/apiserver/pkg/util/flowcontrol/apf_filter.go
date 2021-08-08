@@ -21,14 +21,15 @@ import (
 	"strconv"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apiserver/pkg/server/mux"
 	"k8s.io/apiserver/pkg/util/flowcontrol/counter"
 	fq "k8s.io/apiserver/pkg/util/flowcontrol/fairqueuing"
+	fairqueuingclock "k8s.io/apiserver/pkg/util/flowcontrol/fairqueuing/clock"
 	fqs "k8s.io/apiserver/pkg/util/flowcontrol/fairqueuing/queueset"
 	"k8s.io/apiserver/pkg/util/flowcontrol/metrics"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/klog/v2"
+	utilclock "k8s.io/utils/clock"
 
 	flowcontrol "k8s.io/api/flowcontrol/v1beta1"
 	flowcontrolclient "k8s.io/client-go/kubernetes/typed/flowcontrol/v1beta1"
@@ -49,6 +50,8 @@ type Interface interface {
 	// that the request should be executed then `execute()` will be
 	// invoked once to execute the request; otherwise `execute()` will
 	// not be invoked.
+	// Handle() should never return while execute() is running, even if
+	// ctx is cancelled or times out.
 	Handle(ctx context.Context,
 		requestDigest RequestDigest,
 		noteFn func(fs *flowcontrol.FlowSchema, pl *flowcontrol.PriorityLevelConfiguration),
@@ -66,6 +69,9 @@ type Interface interface {
 
 	// Install installs debugging endpoints to the web-server.
 	Install(c *mux.PathRecorderMux)
+
+	// WatchTracker provides the WatchTracker interface.
+	WatchTracker
 }
 
 // This request filter implements https://github.com/kubernetes/enhancements/blob/master/keps/sig-api-machinery/1040-priority-and-fairness/README.md
@@ -78,7 +84,7 @@ func New(
 	requestWaitLimit time.Duration,
 ) Interface {
 	grc := counter.NoOp{}
-	clk := clock.RealClock{}
+	clk := fairqueuingclock.RealEventClock{}
 	return NewTestable(TestableConfig{
 		Name:                   "Controller",
 		Clock:                  clk,
@@ -99,7 +105,7 @@ type TestableConfig struct {
 	Name string
 
 	// Clock to use in timing deliberate delays
-	Clock clock.PassiveClock
+	Clock utilclock.PassiveClock
 
 	// AsFieldManager is the string to use in the metadata for
 	// server-side apply.  Normally this is

@@ -672,10 +672,13 @@ func describeQuota(resourceQuota *corev1.ResourceQuota) (string, error) {
 
 		msg := "%v\t%v\t%v\n"
 		for i := range resources {
-			resource := resources[i]
-			hardQuantity := resourceQuota.Status.Hard[resource]
-			usedQuantity := resourceQuota.Status.Used[resource]
-			w.Write(LEVEL_0, msg, resource, usedQuantity.String(), hardQuantity.String())
+			resourceName := resources[i]
+			hardQuantity := resourceQuota.Status.Hard[resourceName]
+			usedQuantity := resourceQuota.Status.Used[resourceName]
+			if hardQuantity.Format != usedQuantity.Format {
+				usedQuantity = *resource.NewQuantity(usedQuantity.Value(), hardQuantity.Format)
+			}
+			w.Write(LEVEL_0, msg, resourceName, usedQuantity.String(), hardQuantity.String())
 		}
 		return nil
 	})
@@ -2602,6 +2605,7 @@ func (i *IngressDescriber) describeIngressV1(ing *networkingv1.Ingress, events *
 	return tabbedString(func(out io.Writer) error {
 		w := NewPrefixWriter(out)
 		w.Write(LEVEL_0, "Name:\t%v\n", ing.Name)
+		printLabelsMultiline(w, "Labels", ing.Labels)
 		w.Write(LEVEL_0, "Namespace:\t%v\n", ing.Namespace)
 		w.Write(LEVEL_0, "Address:\t%v\n", loadBalancerStatusStringer(ing.Status.LoadBalancer, true))
 		def := ing.Spec.DefaultBackend
@@ -2657,6 +2661,7 @@ func (i *IngressDescriber) describeIngressV1beta1(ing *networkingv1beta1.Ingress
 	return tabbedString(func(out io.Writer) error {
 		w := NewPrefixWriter(out)
 		w.Write(LEVEL_0, "Name:\t%v\n", ing.Name)
+		printLabelsMultiline(w, "Labels", ing.Labels)
 		w.Write(LEVEL_0, "Namespace:\t%v\n", ing.Namespace)
 		w.Write(LEVEL_0, "Address:\t%v\n", loadBalancerStatusStringer(ing.Status.LoadBalancer, true))
 		def := ing.Spec.Backend
